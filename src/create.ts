@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 
 /**
- * Proton Drive - Upload File
+ * Proton Drive - Create File or Directory
  *
- * Uploads a local file to Proton Drive.
- * If the file path contains directories (e.g., my_files/lol/lol2.txt),
- * those directories will be created on the remote if they don't exist.
- * If a file with the same name exists, it will be overwritten with a new revision.
+ * Creates a file or directory on Proton Drive.
+ * - For files: uploads the file content. If the file exists, creates a new revision.
+ * - For directories: creates an empty directory. If it exists, does nothing.
+ *
+ * Path handling:
+ * - If the path starts with my_files/, that prefix is stripped.
+ * - Parent directories are created automatically if they don't exist.
  */
 
-import { createReadStream, statSync } from 'fs';
+import { createReadStream, statSync, Stats } from 'fs';
 import { Readable } from 'stream';
 import { basename, dirname } from 'path';
 import { input, password, confirm } from '@inquirer/prompts';
@@ -199,19 +202,23 @@ function nodeStreamToWebStream(nodeStream: Readable): ReadableStream<Uint8Array>
 }
 
 /**
- * Find an existing file by name in a folder
+ * Find an existing file by name in a folder.
+ *
+ * Note: We iterate through ALL children even after finding a match to ensure
+ * the SDK's cache is marked as "children complete". See findFolderByName for details.
  */
 async function findFileByName(
     client: ProtonDriveClientType,
     folderUid: string,
     fileName: string
 ): Promise<string | null> {
+    let foundUid: string | null = null;
     for await (const node of client.iterateFolderChildren(folderUid)) {
-        if (node.ok && node.value?.name === fileName && node.value.type === 'file') {
-            return node.value.uid;
+        if (!foundUid && node.ok && node.value?.name === fileName && node.value.type === 'file') {
+            foundUid = node.value.uid;
         }
     }
-    return null;
+    return foundUid;
 }
 
 /**
@@ -243,12 +250,12 @@ async function findFolderByName(
 }
 
 /**
- * Get the remote path from a local file path.
- * If the path starts with my_files/, strip that prefix.
- * Returns the directory path (without the filename).
+ * Parse a path and return its components.
+ * Strips my_files/ prefix if present.
+ * Returns { parentParts: string[], name: string }
  */
-function getRemoteDirPath(localFilePath: string): string[] {
-    let relativePath = localFilePath;
+function parsePath(localPath: string): { parentParts: string[]; name: string } {
+    let relativePath = localPath;
 
     // Strip my_files/ prefix if present
     if (relativePath.startsWith('my_files/')) {
@@ -257,16 +264,22 @@ function getRemoteDirPath(localFilePath: string): string[] {
         relativePath = relativePath.slice('./my_files/'.length);
     }
 
-    // Get the directory part (without the filename)
+    // Remove trailing slash for directories
+    if (relativePath.endsWith('/')) {
+        relativePath = relativePath.slice(0, -1);
+    }
+
+    const name = basename(relativePath);
     const dirPath = dirname(relativePath);
 
-    // If there's no directory (file is at root), return empty array
+    // If there's no directory (item is at root), return empty array
     if (dirPath === '.' || dirPath === '') {
-        return [];
+        return { parentParts: [], name };
     }
 
     // Split by / to get folder components
-    return dirPath.split('/').filter((part) => part.length > 0);
+    const parentParts = dirPath.split('/').filter((part) => part.length > 0);
+    return { parentParts, name };
 }
 
 /**
@@ -274,7 +287,6 @@ function getRemoteDirPath(localFilePath: string): string[] {
  * Returns the UID of the final (deepest) folder.
  *
  * This is O(d) API calls where d = path depth, which is unavoidable for tree traversal.
- * Each level uses early-exit when the folder is found.
  * Once we need to create a folder, all subsequent folders must be created (no more searching).
  */
 async function ensureRemotePath(
@@ -295,7 +307,7 @@ async function ensureRemotePath(
             }
             currentFolderUid = result.value!.uid;
         } else {
-            // Search for existing folder (with early exit on match)
+            // Search for existing folder
             const existingFolderUid = await findFolderByName(client, currentFolderUid, folderName);
 
             if (existingFolderUid) {
@@ -329,27 +341,147 @@ function formatSize(bytes: number): string {
 }
 
 // ============================================================================
+// File Upload
+// ============================================================================
+
+async function uploadFile(
+    client: ProtonDriveClientType,
+    targetFolderUid: string,
+    localFilePath: string,
+    fileName: string,
+    fileStat: Stats
+): Promise<void> {
+    const fileSize = Number(fileStat.size);
+
+    // Check if file already exists in the target folder
+    console.log(`Checking if "${fileName}" already exists...`);
+    const existingFileUid = await findFileByName(client, targetFolderUid, fileName);
+
+    const metadata: UploadMetadata = {
+        mediaType: 'application/octet-stream',
+        expectedSize: fileSize,
+        modificationTime: fileStat.mtime,
+    };
+
+    let uploadController: UploadController;
+
+    if (existingFileUid) {
+        console.log(`File exists, uploading new revision...`);
+
+        const revisionUploader = await client.getFileRevisionUploader(existingFileUid, metadata);
+
+        const nodeStream = createReadStream(localFilePath);
+        const webStream = nodeStreamToWebStream(nodeStream);
+
+        uploadController = await revisionUploader.writeStream(webStream, [], (uploadedBytes) => {
+            const percent = ((uploadedBytes / fileSize) * 100).toFixed(1);
+            process.stdout.write(
+                `\rUploading: ${formatSize(uploadedBytes)} / ${formatSize(fileSize)} (${percent}%)`
+            );
+        });
+    } else {
+        console.log(`File doesn't exist, creating new file...`);
+
+        const fileUploader = await client.getFileUploader(targetFolderUid, fileName, metadata);
+
+        const nodeStream = createReadStream(localFilePath);
+        const webStream = nodeStreamToWebStream(nodeStream);
+
+        uploadController = await fileUploader.writeStream(webStream, [], (uploadedBytes) => {
+            const percent = ((uploadedBytes / fileSize) * 100).toFixed(1);
+            process.stdout.write(
+                `\rUploading: ${formatSize(uploadedBytes)} / ${formatSize(fileSize)} (${percent}%)`
+            );
+        });
+    }
+
+    // Wait for completion
+    const nodeUid = await uploadController.completion();
+    console.log('\n');
+    console.log(`Upload complete!`);
+    console.log(`Node UID: ${nodeUid}`);
+}
+
+// ============================================================================
+// Directory Creation
+// ============================================================================
+
+async function createDirectory(
+    client: ProtonDriveClientType,
+    targetFolderUid: string,
+    dirName: string
+): Promise<void> {
+    // Check if directory already exists
+    console.log(`Checking if "${dirName}" already exists...`);
+    const existingFolderUid = await findFolderByName(client, targetFolderUid, dirName);
+
+    if (existingFolderUid) {
+        console.log(`Directory already exists.`);
+        console.log(`Node UID: ${existingFolderUid}`);
+    } else {
+        console.log(`Creating directory: ${dirName}`);
+        const result = await client.createFolder(targetFolderUid, dirName);
+        if (!result.ok) {
+            throw new Error(`Failed to create directory "${dirName}": ${result.error}`);
+        }
+        console.log(`Directory created!`);
+        console.log(`Node UID: ${result.value!.uid}`);
+    }
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
 async function main(): Promise<void> {
-    const localFilePath = process.argv[2] || './my_files/file-to-add.txt';
+    const localPath = process.argv[2];
 
-    // Check if file exists
-    let fileStat;
-    try {
-        fileStat = statSync(localFilePath);
-    } catch {
-        console.error(`Error: File not found: ${localFilePath}`);
+    if (!localPath) {
+        console.error('Usage: npx ts-node src/create.ts <path>');
+        console.error('');
+        console.error('Examples:');
+        console.error('  npx ts-node src/create.ts my_files/document.txt     # Upload a file');
+        console.error('  npx ts-node src/create.ts my_files/photos/          # Create a directory');
+        console.error(
+            '  npx ts-node src/create.ts my_files/a/b/c/file.txt   # Upload with nested dirs'
+        );
         process.exit(1);
     }
 
-    const fileName = basename(localFilePath);
-    const fileSize = fileStat.size;
+    // Check if path exists locally
+    let pathStat: Stats | null = null;
+    let isDirectory = false;
 
-    console.log(`Uploading: ${localFilePath}`);
-    console.log(`  Name: ${fileName}`);
-    console.log(`  Size: ${formatSize(fileSize)}`);
+    try {
+        pathStat = statSync(localPath);
+        isDirectory = pathStat.isDirectory();
+    } catch {
+        // Path doesn't exist locally - treat as directory creation if ends with /
+        if (localPath.endsWith('/')) {
+            isDirectory = true;
+        } else {
+            console.error(`Error: Path not found: ${localPath}`);
+            console.error('For creating a new directory, add a trailing slash: my_files/newdir/');
+            process.exit(1);
+        }
+    }
+
+    const { parentParts, name } = parsePath(localPath);
+
+    if (isDirectory) {
+        console.log(`Creating directory: ${localPath}`);
+        console.log(`  Name: ${name}`);
+        if (parentParts.length > 0) {
+            console.log(`  Parent path: ${parentParts.join('/')}`);
+        }
+    } else {
+        console.log(`Uploading file: ${localPath}`);
+        console.log(`  Name: ${name}`);
+        console.log(`  Size: ${formatSize(pathStat!.size)}`);
+        if (parentParts.length > 0) {
+            console.log(`  Parent path: ${parentParts.join('/')}`);
+        }
+    }
     console.log();
 
     try {
@@ -453,69 +585,20 @@ async function main(): Promise<void> {
 
         const rootFolderUid = rootFolder.value!.uid;
 
-        // Parse the remote directory path and ensure it exists
-        const remoteDirParts = getRemoteDirPath(localFilePath);
+        // Ensure parent directories exist
         let targetFolderUid = rootFolderUid;
 
-        if (remoteDirParts.length > 0) {
-            console.log(`Ensuring remote path exists: ${remoteDirParts.join('/')}`);
-            targetFolderUid = await ensureRemotePath(client, rootFolderUid, remoteDirParts);
+        if (parentParts.length > 0) {
+            console.log(`Ensuring parent path exists: ${parentParts.join('/')}`);
+            targetFolderUid = await ensureRemotePath(client, rootFolderUid, parentParts);
         }
 
-        // Check if file already exists in the target folder
-        console.log(`Checking if "${fileName}" already exists...`);
-        const existingFileUid = await findFileByName(client, targetFolderUid, fileName);
-
-        const metadata: UploadMetadata = {
-            mediaType: 'application/octet-stream',
-            expectedSize: fileSize,
-            modificationTime: fileStat.mtime,
-        };
-
-        let uploadController: UploadController;
-
-        if (existingFileUid) {
-            console.log(`File exists, uploading new revision...`);
-
-            const revisionUploader = await client.getFileRevisionUploader(
-                existingFileUid,
-                metadata
-            );
-
-            const nodeStream = createReadStream(localFilePath);
-            const webStream = nodeStreamToWebStream(nodeStream);
-
-            uploadController = await revisionUploader.writeStream(
-                webStream,
-                [],
-                (uploadedBytes) => {
-                    const percent = ((uploadedBytes / fileSize) * 100).toFixed(1);
-                    process.stdout.write(
-                        `\rUploading: ${formatSize(uploadedBytes)} / ${formatSize(fileSize)} (${percent}%)`
-                    );
-                }
-            );
+        // Create file or directory
+        if (isDirectory) {
+            await createDirectory(client, targetFolderUid, name);
         } else {
-            console.log(`File doesn't exist, creating new file...`);
-
-            const fileUploader = await client.getFileUploader(targetFolderUid, fileName, metadata);
-
-            const nodeStream = createReadStream(localFilePath);
-            const webStream = nodeStreamToWebStream(nodeStream);
-
-            uploadController = await fileUploader.writeStream(webStream, [], (uploadedBytes) => {
-                const percent = ((uploadedBytes / fileSize) * 100).toFixed(1);
-                process.stdout.write(
-                    `\rUploading: ${formatSize(uploadedBytes)} / ${formatSize(fileSize)} (${percent}%)`
-                );
-            });
+            await uploadFile(client, targetFolderUid, localPath, name, pathStat!);
         }
-
-        // Wait for completion
-        const nodeUid = await uploadController.completion();
-        console.log('\n');
-        console.log(`Upload complete!`);
-        console.log(`Node UID: ${nodeUid}`);
 
         await auth.logout();
     } catch (error) {
