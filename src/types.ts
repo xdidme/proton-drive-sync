@@ -49,7 +49,7 @@ export interface UploadController {
 
 export interface FileUploader {
     getAvailableName(): Promise<string>;
-    writeStream(
+    uploadFromStream(
         stream: ReadableStream,
         thumbnails: [],
         onProgress?: (uploadedBytes: number) => void
@@ -57,7 +57,7 @@ export interface FileUploader {
 }
 
 export interface FileRevisionUploader {
-    writeStream(
+    uploadFromStream(
         stream: ReadableStream,
         thumbnails: [],
         onProgress?: (uploadedBytes: number) => void

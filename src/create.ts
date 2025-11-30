@@ -100,18 +100,14 @@ async function uploadFile(
         const nodeStream = createReadStream(localFilePath);
         const webStream = nodeStreamToWebStream(nodeStream);
 
-        uploadController = await revisionUploader.writeStream(webStream, [], (_uploadedBytes) => {
-            // Progress callback - silent
-        });
+        uploadController = await revisionUploader.uploadFromStream(webStream, []);
     } else {
         const fileUploader = await client.getFileUploader(targetFolderUid, fileName, metadata);
 
         const nodeStream = createReadStream(localFilePath);
         const webStream = nodeStreamToWebStream(nodeStream);
 
-        uploadController = await fileUploader.writeStream(webStream, [], (_uploadedBytes) => {
-            // Progress callback - silent
-        });
+        uploadController = await fileUploader.uploadFromStream(webStream, []);
     }
 
     // Wait for completion
