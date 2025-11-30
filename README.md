@@ -7,17 +7,24 @@ A CLI tool that watches a local directory and syncs changes to Proton Drive in r
 - [pnpm](https://pnpm.io/installation)
 - [Watchman](https://facebook.github.io/watchman/docs/install) - `brew install watchman` on macOS
 
-## Setup
+## Installation
 
 ```bash
-git submodule update --init --recursive
+git clone --recursive https://github.com/user/proton-drive-sync
+cd proton-drive-sync
 pnpm install
+pnpm build
+pnpm link --global
 ```
 
-## Run
+## Usage
 
 ```bash
-pnpm sync
+# Start syncing
+proton-drive-sync sync
+
+# Show help
+proton-drive-sync --help
 ```
 
 This will:
@@ -28,3 +35,25 @@ This will:
 4. Automatically sync file/directory creates, updates, and deletes to Proton Drive
 
 Press `Ctrl+C` to stop watching.
+
+## Development
+
+For an editable install (changes to source are reflected immediately):
+
+```bash
+pnpm install
+pnpm link --global
+```
+
+Then run directly with tsx (no build step required):
+
+```bash
+tsx src/index.ts sync
+```
+
+Or rebuild after changes:
+
+```bash
+pnpm build
+proton-drive-sync sync
+```

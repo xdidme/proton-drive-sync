@@ -1,11 +1,14 @@
 {
-    "name": "proton-drive-examples",
+    "name": "proton-drive-sync",
     "version": "1.0.0",
-    "description": "Examples for using the Proton Drive SDK",
+    "description": "Sync local files to Proton Drive",
     "type": "module",
+    "bin": {
+        "proton-drive-sync": "./dist/index.js"
+    },
     "scripts": {
         "postinstall": "cd sdk/js/sdk && npm pkg set pnpm.overrides.typescript='~5.6.3' && npm pkg set devDependencies.@types/node='^20' && pnpm install && pnpm build",
-        "sync": "tsx src/sync.ts",
+        "build": "tsc",
         "prepare": "husky"
     },
     "keywords": [
@@ -20,6 +23,7 @@
         "@inquirer/prompts": "^8.0.1",
         "@protontech/drive-sdk": "link:./sdk/js/sdk",
         "bcryptjs": "^3.0.3",
+        "commander": "^14.0.2",
         "fb-watchman": "^2.0.2",
         "keychain": "^1.5.0",
         "openpgp": "^6.2.2",

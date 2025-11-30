@@ -1,22 +1,13 @@
 #!/usr/bin/env node
 
 /**
- * Proton Drive - Watchman Client
- *
- * Watches the my_files directory for changes and syncs them to Proton Drive.
- * Uses Facebook's Watchman for efficient filesystem watching.
- *
- * - Authenticates once at startup
- * - On file changes: uploads/updates the file on Proton Drive
- * - On file deletions: moves the file to trash on Proton Drive
- * - On directory changes: creates the directory on Proton Drive
+ * Proton Drive Sync CLI
  */
 
+import { realpathSync } from 'fs';
+import { program } from 'commander';
 import watchman from 'fb-watchman';
-import { realpathSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
 import { input, password, confirm } from '@inquirer/prompts';
-import { xdgState } from 'xdg-basedir';
 import {
     ProtonAuth,
     createProtonHttpClient,
@@ -26,6 +17,7 @@ import {
     initCrypto,
 } from './auth.js';
 import { getStoredCredentials, storeCredentials, deleteStoredCredentials } from './keychain.js';
+import { appState, saveState } from './state.js';
 import type { ProtonDriveClient, ApiError } from './types.js';
 import { createNode } from './create.js';
 import { deleteNode } from './delete.js';
@@ -42,51 +34,15 @@ interface FileChange {
     type: 'f' | 'd';
 }
 
-interface StateData {
-    clock: string | null;
-}
-
 // ============================================================================
 // Constants
 // ============================================================================
 
-const WATCH_DIR = realpathSync('/Users/damianb/code/miniprojects/proton-drive-sync/my_files');
+const WATCH_DIR = realpathSync('./my_files');
 const SUB_NAME = 'proton-drive-sync';
 
 // Debounce time in ms - wait for rapid changes to settle
 const DEBOUNCE_MS = 500;
-
-// State file path
-if (!xdgState) {
-    console.error('Could not determine XDG state directory');
-    process.exit(1);
-}
-const STATE_DIR = join(xdgState, 'proton-drive-sync');
-const STATE_FILE = join(STATE_DIR, 'state.json');
-
-// ============================================================================
-// State Management
-// ============================================================================
-
-function loadState(): StateData {
-    if (!existsSync(STATE_FILE)) {
-        return { clock: null };
-    }
-    try {
-        return JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
-    } catch {
-        return { clock: null };
-    }
-}
-
-function saveState(data: StateData): void {
-    if (!existsSync(STATE_DIR)) {
-        mkdirSync(STATE_DIR, { recursive: true });
-    }
-    writeFileSync(STATE_FILE, JSON.stringify(data, null, 2));
-}
-
-const appState = loadState();
 
 // ============================================================================
 // Watchman Client
@@ -347,27 +303,30 @@ function setupWatchman(): void {
 }
 
 // ============================================================================
-// Main
+// Commands
 // ============================================================================
 
-async function main(): Promise<void> {
-    try {
-        // Authenticate first
-        protonClient = await authenticate();
+async function syncCommand(): Promise<void> {
+    // Authenticate first
+    protonClient = await authenticate();
 
-        // Then setup watchman
-        setupWatchman();
+    // Then setup watchman
+    setupWatchman();
 
-        // Handle graceful shutdown
-        process.on('SIGINT', () => {
-            console.log('\nShutting down...');
-            watchmanClient.end();
-            process.exit(0);
-        });
-    } catch (error) {
-        console.error('Error:', (error as Error).message);
-        process.exit(1);
-    }
+    // Handle graceful shutdown
+    process.on('SIGINT', () => {
+        console.log('\nShutting down...');
+        watchmanClient.end();
+        process.exit(0);
+    });
 }
 
-main();
+// ============================================================================
+// CLI Setup
+// ============================================================================
+
+program.name('proton-drive-sync').description('Sync local files to Proton Drive').version('1.0.0');
+
+program.command('sync').description('Watch and sync files to Proton Drive').action(syncCommand);
+
+program.parse();
