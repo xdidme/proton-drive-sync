@@ -27,6 +27,7 @@
         "fb-watchman": "^2.0.2",
         "keychain": "^1.5.0",
         "openpgp": "^6.2.2",
+        "p-retry": "^7.1.0",
         "winston": "^3.18.3",
         "xdg-basedir": "^5.1.0"
     },

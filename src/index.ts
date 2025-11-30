@@ -19,6 +19,7 @@ import {
 import { getStoredCredentials, storeCredentials, deleteStoredCredentials } from './keychain.js';
 import { appState, saveState } from './state.js';
 import { logger, enableVerbose } from './logger.js';
+import pRetry from 'p-retry';
 import type { ProtonDriveClient, ApiError } from './types.js';
 import { createNode } from './create.js';
 import { deleteNode } from './delete.js';
@@ -65,6 +66,9 @@ async function processChanges(): Promise<void> {
     if (isProcessing || !protonClient) return;
     isProcessing = true;
 
+    // DEBUG: Simulate slow sync to test rapid add/delete behavior
+    await new Promise((resolve) => setTimeout(resolve, 10000));
+
     // Take snapshot of current pending changes
     const changes = new Map(pendingChanges);
     pendingChanges.clear();
@@ -78,29 +82,54 @@ async function processChanges(): Promise<void> {
                 const typeLabel = change.type === 'd' ? 'directory' : 'file';
                 logger.info(`Creating/updating ${typeLabel}: ${path}`);
 
-                const result = await createNode(protonClient, fullPath);
-                if (result.success) {
-                    logger.info(`Success: ${path} -> ${result.nodeUid}`);
-                } else {
-                    logger.error(`Failed: ${path} - ${result.error}`);
-                }
+                const result = await pRetry(
+                    async () => {
+                        const res = await createNode(protonClient!, fullPath);
+                        if (!res.success) {
+                            throw new Error(res.error);
+                        }
+                        return res;
+                    },
+                    {
+                        retries: 3,
+                        onFailedAttempt: (ctx) => {
+                            logger.warn(
+                                `Create attempt ${ctx.attemptNumber} failed for ${path}: ${ctx.error.message}. ${ctx.retriesLeft} retries left.`
+                            );
+                        },
+                    }
+                );
+                logger.info(`Success: ${path} -> ${result.nodeUid}`);
             } else {
                 // File or directory was deleted
                 logger.info(`Deleting: ${path}`);
 
-                const result = await deleteNode(protonClient, fullPath, false);
-                if (result.success) {
-                    if (result.existed) {
-                        logger.info(`Deleted: ${path}`);
-                    } else {
-                        logger.info(`Already gone: ${path}`);
+                const result = await pRetry(
+                    async () => {
+                        const res = await deleteNode(protonClient!, fullPath, false);
+                        if (!res.success) {
+                            throw new Error(res.error);
+                        }
+                        return res;
+                    },
+                    {
+                        retries: 3,
+                        onFailedAttempt: (ctx) => {
+                            logger.warn(
+                                `Delete attempt ${ctx.attemptNumber} failed for ${path}: ${ctx.error.message}. ${ctx.retriesLeft} retries left.`
+                            );
+                        },
                     }
+                );
+                if (result.existed) {
+                    logger.info(`Deleted: ${path}`);
                 } else {
-                    logger.error(`Failed to delete: ${path} - ${result.error}`);
+                    logger.info(`Already gone: ${path}`);
                 }
             }
         } catch (error) {
-            logger.error(`Error processing ${path}: ${(error as Error).message}`);
+            // All retries exhausted - log error and continue (clock will still advance)
+            logger.error(`Failed after 3 retries for ${path}: ${(error as Error).message}`);
         }
     }
 
