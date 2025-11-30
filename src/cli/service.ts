@@ -63,6 +63,7 @@ function generateWatchmanPlist(watchmanPath: string): string {
 }
 
 function generateSyncPlist(binPath: string): string {
+    const home = homedir();
     return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -75,6 +76,13 @@ function generateSyncPlist(binPath: string): string {
         <string>sync</string>
         <string>--watch</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>${home}</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -82,6 +90,10 @@ function generateSyncPlist(binPath: string): string {
         <key>SuccessfulExit</key>
         <false/>
     </dict>
+    <key>StandardOutPath</key>
+    <string>${home}/Library/Logs/proton-drive-sync.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>${home}/Library/Logs/proton-drive-sync.err.log</string>
 </dict>
 </plist>
 `;

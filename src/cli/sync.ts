@@ -384,6 +384,12 @@ function setupWatchmanDaemon(config: Config): void {
         // Extract the watch root from the subscription name
         const dirName = resp.subscription.replace(`${SUB_NAME}-`, '');
         const watchRoot = config.sync_dirs.find((d) => basename(realpathSync(d)) === dirName) || '';
+
+        if (!watchRoot) {
+            logger.error(`Could not find watch root for subscription: ${resp.subscription}`);
+            return;
+        }
+
         const resolvedRoot = realpathSync(watchRoot);
 
         // Get clock from this notification (will be saved after each file is processed)
