@@ -6,7 +6,8 @@
  * Lists all files in your Proton Drive.
  */
 
-import { input, password } from '@inquirer/prompts';
+import { input, password, confirm } from '@inquirer/prompts';
+import keytar from 'keytar';
 import {
     ProtonAuth,
     createProtonHttpClient,
@@ -15,6 +16,34 @@ import {
     createOpenPGPCrypto,
     initCrypto,
 } from './auth.js';
+
+// ============================================================================
+// Keychain Helpers
+// ============================================================================
+
+const KEYCHAIN_SERVICE = 'proton-drive-sync';
+
+async function getStoredCredentials() {
+    const credentials = await keytar.findCredentials(KEYCHAIN_SERVICE);
+    if (credentials.length > 0) {
+        return {
+            username: credentials[0].account,
+            password: credentials[0].password,
+        };
+    }
+    return null;
+}
+
+async function storeCredentials(username, pwd) {
+    await keytar.setPassword(KEYCHAIN_SERVICE, username, pwd);
+}
+
+async function deleteStoredCredentials() {
+    const credentials = await keytar.findCredentials(KEYCHAIN_SERVICE);
+    for (const cred of credentials) {
+        await keytar.deletePassword(KEYCHAIN_SERVICE, cred.account);
+    }
+}
 
 // ============================================================================
 // File Listing
@@ -71,12 +100,48 @@ async function main() {
     try {
         await initCrypto();
 
-        const username = await input({ message: 'Proton username:' });
-        const pwd = await password({ message: 'Password:' });
+        let username, pwd;
+        
+        // Check for stored credentials in Keychain
+        const storedCreds = await getStoredCredentials();
+        
+        if (storedCreds) {
+            console.log(`Found stored credentials for: ${storedCreds.username}`);
+            const useStored = await confirm({ 
+                message: 'Use stored credentials?',
+                default: true 
+            });
+            
+            if (useStored) {
+                username = storedCreds.username;
+                pwd = storedCreds.password;
+            } else {
+                // Ask if they want to enter new credentials
+                username = await input({ message: 'Proton username:' });
+                pwd = await password({ message: 'Password:' });
+            }
+        } else {
+            username = await input({ message: 'Proton username:' });
+            pwd = await password({ message: 'Password:' });
+        }
 
         if (!username || !pwd) {
             console.error('Username and password are required.');
             process.exit(1);
+        }
+        
+        // Offer to save credentials if they're new
+        if (!storedCreds || storedCreds.username !== username || storedCreds.password !== pwd) {
+            const saveToKeychain = await confirm({
+                message: 'Save credentials to Keychain?',
+                default: true
+            });
+            
+            if (saveToKeychain) {
+                await deleteStoredCredentials(); // Remove old credentials first
+                await storeCredentials(username, pwd);
+                console.log('Credentials saved to Keychain.');
+            }
         }
 
         console.log('\nAuthenticating with Proton...');
