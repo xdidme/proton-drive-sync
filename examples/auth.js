@@ -824,9 +824,13 @@ export class ProtonAuth {
 /**
  * Create an HTTP client for the Proton Drive SDK
  * @param {Object} session - Auth session
+ * @param {Object} options - Options
+ * @param {boolean} options.debug - Enable debug logging
  * @returns {Object} HTTP client compatible with ProtonDriveHTTPClient interface
  */
-export function createProtonHttpClient(session) {
+export function createProtonHttpClient(session, options = {}) {
+    const debug = options.debug || false;
+
     return {
         async fetchJson(request) {
             const { url, method, headers, json, timeoutMs, signal } = request;
@@ -840,16 +844,40 @@ export function createProtonHttpClient(session) {
             }
             headers.set('x-pm-appversion', APP_VERSION);
 
+            const fullUrl = `${API_BASE_URL}/${url}`;
+
+            if (debug) {
+                console.log('\n[DEBUG] === HTTP Request ===');
+                console.log(`[DEBUG] ${method} ${fullUrl}`);
+                console.log('[DEBUG] Headers:', Object.fromEntries(headers.entries()));
+                if (json) {
+                    console.log('[DEBUG] Body:', JSON.stringify(json, null, 2));
+                }
+            }
+
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
             try {
-                const response = await fetch(`${API_BASE_URL}/${url}`, {
+                const response = await fetch(fullUrl, {
                     method,
                     headers,
                     body: json ? JSON.stringify(json) : undefined,
                     signal: signal || controller.signal,
                 });
+
+                if (debug) {
+                    console.log(`[DEBUG] Response Status: ${response.status} ${response.statusText}`);
+                    // Clone to read body for debugging
+                    const cloned = response.clone();
+                    try {
+                        const responseBody = await cloned.json();
+                        console.log('[DEBUG] Response Body:', JSON.stringify(responseBody, null, 2));
+                    } catch (e) {
+                        console.log('[DEBUG] Response Body: (could not parse as JSON)');
+                    }
+                }
+
                 return response;
             } finally {
                 clearTimeout(timeout);
@@ -868,16 +896,29 @@ export function createProtonHttpClient(session) {
             }
             headers.set('x-pm-appversion', APP_VERSION);
 
+            const fullUrl = `${API_BASE_URL}/${url}`;
+
+            if (debug) {
+                console.log('\n[DEBUG] === HTTP Blob Request ===');
+                console.log(`[DEBUG] ${method} ${fullUrl}`);
+                console.log('[DEBUG] Headers:', Object.fromEntries(headers.entries()));
+            }
+
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
             try {
-                const response = await fetch(`${API_BASE_URL}/${url}`, {
+                const response = await fetch(fullUrl, {
                     method,
                     headers,
                     body,
                     signal: signal || controller.signal,
                 });
+
+                if (debug) {
+                    console.log(`[DEBUG] Blob Response Status: ${response.status} ${response.statusText}`);
+                }
+
                 return response;
             } finally {
                 clearTimeout(timeout);
