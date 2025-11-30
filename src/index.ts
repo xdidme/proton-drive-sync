@@ -21,9 +21,10 @@ program.command('reset').description('Reset sync state').action(resetCommand);
 
 program
     .command('sync')
-    .description('Watch and sync files to Proton Drive')
+    .description('Sync changes to Proton Drive')
     .option('-v, --verbose', 'Enable verbose output to console')
     .option('-n, --dry-run', 'Show what would be synced without making changes')
+    .option('-d, --daemon', 'Keep running and watch for changes')
     .action(syncCommand);
 
 program.parse();

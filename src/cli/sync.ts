@@ -42,6 +42,7 @@ const DEBOUNCE_MS = 500;
 // ============================================================================
 
 let dryRun = false;
+let daemonMode = false;
 
 // ============================================================================
 // Watchman Client
@@ -58,6 +59,10 @@ const pendingChanges = new Map<string, FileChange>();
 let debounceTimer: NodeJS.Timeout | null = null;
 let protonClient: ProtonDriveClient | null = null;
 let isProcessing = false;
+
+// Track completion for one-shot mode
+let pendingQueries = 0;
+let oneShotResolve: (() => void) | null = null;
 
 async function processChanges(): Promise<void> {
     if (isProcessing || !protonClient) return;
@@ -145,6 +150,9 @@ async function processChanges(): Promise<void> {
     // If more changes came in while processing, schedule another run
     if (pendingChanges.size > 0) {
         scheduleProcessing();
+    } else if (!daemonMode && oneShotResolve) {
+        // One-shot mode: resolve when all changes processed
+        oneShotResolve();
     }
 }
 
@@ -190,10 +198,90 @@ async function authenticateFromKeychain(): Promise<ProtonDriveClient> {
 }
 
 // ============================================================================
-// Watchman Setup
+// One-shot Sync (query mode)
 // ============================================================================
 
-function setupWatchman(config: Config): void {
+function runOneShotSync(config: Config): Promise<void> {
+    return new Promise((resolve) => {
+        oneShotResolve = resolve;
+        pendingQueries = config.sync_dirs.length;
+
+        for (const dir of config.sync_dirs) {
+            const watchDir = realpathSync(dir);
+
+            watchmanClient.command(['watch-project', watchDir], (err, resp) => {
+                if (err) {
+                    logger.error(`Watchman error for ${dir}: ${err}`);
+                    process.exit(1);
+                }
+
+                const watchResp = resp as watchman.WatchProjectResponse;
+                const root = watchResp.watch;
+                const relative = watchResp.relative_path || '';
+
+                const savedClock = appState.clocks[watchDir];
+
+                if (savedClock) {
+                    logger.info(`Syncing changes since last run for ${dir}...`);
+                } else {
+                    logger.info(`First run - syncing all existing files in ${dir}...`);
+                }
+
+                // Build query
+                const query: Record<string, unknown> = {
+                    expression: ['anyof', ['type', 'f'], ['type', 'd']],
+                    fields: ['name', 'size', 'mtime_ms', 'exists', 'type'],
+                };
+
+                if (savedClock) {
+                    query.since = savedClock;
+                }
+
+                if (relative) {
+                    query.relative_root = relative;
+                }
+
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (watchmanClient as any).command(
+                    ['query', root, query],
+                    (err: Error | null, resp: any) => {
+                        if (err) {
+                            logger.error(`Query error for ${dir}: ${err}`);
+                            process.exit(1);
+                        }
+
+                        // Save clock
+                        if (resp.clock && !dryRun) {
+                            appState.clocks[watchDir] = resp.clock;
+                            saveState(appState);
+                        }
+
+                        // Queue changes
+                        const files = resp.files || [];
+                        for (const file of files) {
+                            const fileChange = file as Omit<FileChange, 'watchRoot'>;
+                            queueChange({ ...fileChange, watchRoot: watchDir });
+                        }
+
+                        pendingQueries--;
+
+                        // If no changes and all queries done, resolve
+                        if (pendingQueries === 0 && pendingChanges.size === 0 && !isProcessing) {
+                            logger.info('No changes to sync.');
+                            resolve();
+                        }
+                    }
+                );
+            });
+        }
+    });
+}
+
+// ============================================================================
+// Daemon Mode (subscription mode)
+// ============================================================================
+
+function setupWatchmanDaemon(config: Config): void {
     // Set up watches for all configured directories
     for (const dir of config.sync_dirs) {
         const watchDir = realpathSync(dir);
@@ -283,7 +371,11 @@ function setupWatchman(config: Config): void {
 // Command
 // ============================================================================
 
-export async function syncCommand(options: { verbose: boolean; dryRun: boolean }): Promise<void> {
+export async function syncCommand(options: {
+    verbose: boolean;
+    dryRun: boolean;
+    daemon: boolean;
+}): Promise<void> {
     if (options.verbose || options.dryRun) {
         enableVerbose();
     }
@@ -293,19 +385,27 @@ export async function syncCommand(options: { verbose: boolean; dryRun: boolean }
         logger.info('[DRY-RUN] Dry run mode enabled - no changes will be made');
     }
 
+    daemonMode = options.daemon;
+
     // Load config
     const config = loadConfig();
 
     // Authenticate using stored credentials
     protonClient = await authenticateFromKeychain();
 
-    // Then setup watchman
-    setupWatchman(config);
+    if (daemonMode) {
+        // Daemon mode: use subscriptions and keep running
+        setupWatchmanDaemon(config);
 
-    // Handle graceful shutdown
-    process.on('SIGINT', () => {
-        logger.info('Shutting down...');
+        // Handle graceful shutdown
+        process.on('SIGINT', () => {
+            logger.info('Shutting down...');
+            watchmanClient.end();
+            process.exit(0);
+        });
+    } else {
+        // One-shot mode: query for changes, process, and exit
+        await runOneShotSync(config);
         watchmanClient.end();
-        process.exit(0);
-    });
+    }
 }
