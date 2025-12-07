@@ -41,3 +41,10 @@ export function disableConsoleLogging(): void {
 export function enableDebug(): void {
   logger.level = 'debug';
 }
+
+/**
+ * Check if debug logging is enabled
+ */
+export function isDebugEnabled(): boolean {
+  return logger.level === 'debug';
+}

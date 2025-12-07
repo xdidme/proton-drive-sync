@@ -304,6 +304,12 @@ async function setupWatchmanDaemon(config: Config): Promise<void> {
       );
       queueChange({ ...fileChange, watchRoot: resolvedRoot });
     }
+
+    // Save the new clock so we don't see these events again on restart
+    const clock = (resp as unknown as { clock?: string }).clock;
+    if (clock) {
+      setClock(resolvedRoot, clock, dryRun);
+    }
   });
 
   // Handle errors & shutdown

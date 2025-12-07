@@ -9,7 +9,7 @@ import { db, schema } from './db/index.js';
 import { SyncJobStatus, SyncEventType } from './db/schema.js';
 import { createNode } from './create.js';
 import { deleteNode } from './delete.js';
-import { logger } from './logger.js';
+import { logger, isDebugEnabled } from './logger.js';
 import type { ProtonDriveClient } from './types.js';
 
 // ============================================================================
@@ -57,6 +57,19 @@ export function enqueueJob(
   dryRun: boolean
 ): void {
   if (dryRun) return;
+
+  // Check if job is already being processed (only query if debug enabled)
+  if (isDebugEnabled()) {
+    const inFlight = db
+      .select()
+      .from(schema.processingQueue)
+      .where(eq(schema.processingQueue.localPath, params.localPath))
+      .get();
+
+    if (inFlight) {
+      logger.debug(`Job for ${params.localPath} is in-flight, will be re-queued as PENDING`);
+    }
+  }
 
   db.insert(schema.syncJobs)
     .values({
@@ -155,6 +168,8 @@ export function getNextPendingJob() {
 export function markJobSynced(jobId: number, localPath: string, dryRun: boolean): void {
   if (dryRun) return;
 
+  logger.debug(`Marking job ${jobId} as SYNCED (${localPath})`);
+
   // Only set SYNCED if status is still PROCESSING
   db.update(schema.syncJobs)
     .set({ status: SyncJobStatus.SYNCED, lastError: null })
@@ -179,6 +194,8 @@ export function markJobBlocked(
 ): void {
   if (dryRun) return;
 
+  logger.debug(`Marking job ${jobId} as BLOCKED (${localPath})`);
+
   // Only set BLOCKED if status is still PROCESSING
   db.update(schema.syncJobs)
     .set({ status: SyncJobStatus.BLOCKED, lastError: error })
@@ -196,6 +213,8 @@ export function markJobBlocked(
  */
 export function markJobProcessing(jobId: number, localPath: string, dryRun: boolean): void {
   if (dryRun) return;
+
+  logger.debug(`Marking job ${jobId} as PROCESSING (${localPath})`);
 
   // Set status to PROCESSING
   db.update(schema.syncJobs)
@@ -335,10 +354,12 @@ export async function processNextJob(client: ProtonDriveClient, dryRun: boolean)
     const networkError = isNetworkError(errorMessage);
 
     if (!networkError && nRetries >= MAX_RETRIES) {
-      logger.error(`Job ${id} failed permanently after ${MAX_RETRIES} retries: ${errorMessage}`);
+      logger.error(
+        `Job ${id} (${localPath}) failed permanently after ${MAX_RETRIES} retries: ${errorMessage}`
+      );
       markJobBlocked(id, localPath, errorMessage, dryRun);
     } else {
-      logger.error(`Job ${id} failed: ${errorMessage}`);
+      logger.error(`Job ${id} (${localPath}) failed: ${errorMessage}`);
       scheduleRetry(id, localPath, nRetries, errorMessage, networkError, dryRun);
     }
 

@@ -6,6 +6,7 @@
 
 import { eq } from 'drizzle-orm';
 import { db, schema, STATE_DIR } from './db/index.js';
+import { logger } from './logger.js';
 
 // Re-export STATE_DIR for other modules
 export { STATE_DIR };
@@ -28,6 +29,9 @@ export function getClock(directory: string): string | null {
  */
 export function setClock(directory: string, clock: string, dryRun: boolean): void {
   if (dryRun) return;
+
+  logger.debug(`Setting clock for ${directory}: ${clock}`);
+
   db.insert(schema.clocks)
     .values({ directory, clock })
     .onConflictDoUpdate({
