@@ -7,14 +7,6 @@
 import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
 
 /**
- * Metadata table for storing schema version and other app-wide settings.
- */
-export const metadata = sqliteTable('metadata', {
-    key: text('key').primaryKey(),
-    value: text('value').notNull(),
-});
-
-/**
  * Clocks table for storing per-directory watchman clocks.
  */
 export const clocks = sqliteTable('clocks', {

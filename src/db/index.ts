@@ -37,12 +37,9 @@ function initializeDatabase() {
     const sqlite = new Database(DB_PATH);
     const db = drizzle(sqlite, { schema });
 
-    // Run migrations
-    // Get the migrations directory relative to the compiled output
+    // Run migrations from the compiled migrations folder
     const migrationsPath = new URL('./migrations', import.meta.url).pathname;
-    if (existsSync(migrationsPath)) {
-        migrate(db, { migrationsFolder: migrationsPath });
-    }
+    migrate(db, { migrationsFolder: migrationsPath });
 
     return db;
 }

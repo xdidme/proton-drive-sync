@@ -1,7 +1,7 @@
 {
     "version": "6",
     "dialect": "sqlite",
-    "id": "edd31c21-e51e-4588-ad4d-c8811e55e0ec",
+    "id": "702dc09d-5928-405e-9bad-eb482c27d8cf",
     "prevId": "00000000-0000-0000-0000-000000000000",
     "tables": {
         "clocks": {
@@ -16,30 +16,6 @@
                 },
                 "clock": {
                     "name": "clock",
-                    "type": "text",
-                    "primaryKey": false,
-                    "notNull": true,
-                    "autoincrement": false
-                }
-            },
-            "indexes": {},
-            "foreignKeys": {},
-            "compositePrimaryKeys": {},
-            "uniqueConstraints": {},
-            "checkConstraints": {}
-        },
-        "metadata": {
-            "name": "metadata",
-            "columns": {
-                "key": {
-                    "name": "key",
-                    "type": "text",
-                    "primaryKey": true,
-                    "notNull": true,
-                    "autoincrement": false
-                },
-                "value": {
-                    "name": "value",
                     "type": "text",
                     "primaryKey": false,
                     "notNull": true,
