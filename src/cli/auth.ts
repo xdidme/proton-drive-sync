@@ -17,8 +17,13 @@ import { logger } from '../logger.js';
 
 /**
  * Create a ProtonDriveClient from username/password
+ * @param sdkDebug - Enable debug logging for the Proton SDK
  */
-export async function createClient(username: string, pwd: string): Promise<ProtonDriveClient> {
+export async function createClient(
+  username: string,
+  pwd: string,
+  sdkDebug = false
+): Promise<ProtonDriveClient> {
   await initCrypto();
 
   const auth = new ProtonAuth();
@@ -40,7 +45,7 @@ export async function createClient(username: string, pwd: string): Promise<Proto
   type SDKModule = typeof import('@protontech/drive-sdk');
   const sdk: SDKModule = await import('@protontech/drive-sdk');
 
-  // Import telemetry module for silent logging (not exported from main index)
+  // Import telemetry module for logging configuration (not exported from main index)
   const telemetryModule = await import('@protontech/drive-sdk/dist/telemetry.js');
 
   const httpClient = createProtonHttpClient(session!);
@@ -48,9 +53,10 @@ export async function createClient(username: string, pwd: string): Promise<Proto
   const account = createProtonAccount(session!, openPGPCryptoModule);
   const srpModuleInstance = createSrpModule();
 
-  // Create a silent telemetry instance (only log errors)
-  const silentTelemetry = new telemetryModule.Telemetry({
-    logFilter: new telemetryModule.LogFilter({ globalLevel: telemetryModule.LogLevel.ERROR }),
+  // Create telemetry with appropriate log level
+  const logLevel = sdkDebug ? telemetryModule.LogLevel.DEBUG : telemetryModule.LogLevel.ERROR;
+  const telemetry = new telemetryModule.Telemetry({
+    logFilter: new telemetryModule.LogFilter({ globalLevel: logLevel }),
     logHandlers: [new telemetryModule.ConsoleLogHandler()],
     metricHandlers: [], // No metrics logging
   });
@@ -64,7 +70,7 @@ export async function createClient(username: string, pwd: string): Promise<Proto
     // @ts-expect-error - PrivateKey types differ between openpgp imports
     openPGPCryptoModule,
     srpModule: srpModuleInstance,
-    telemetry: silentTelemetry,
+    telemetry,
   });
 
   return client as unknown as ProtonDriveClient;
@@ -99,8 +105,9 @@ export async function authCommand(): Promise<void> {
 
 /**
  * Authenticate using stored credentials (for sync command)
+ * @param sdkDebug - Enable debug logging for the Proton SDK
  */
-export async function authenticateFromKeychain(): Promise<ProtonDriveClient> {
+export async function authenticateFromKeychain(sdkDebug = false): Promise<ProtonDriveClient> {
   const storedCreds = await getStoredCredentials();
 
   if (!storedCreds) {
@@ -109,7 +116,7 @@ export async function authenticateFromKeychain(): Promise<ProtonDriveClient> {
   }
 
   logger.info(`Authenticating as ${storedCreds.username}...`);
-  const client = await createClient(storedCreds.username, storedCreds.password);
+  const client = await createClient(storedCreds.username, storedCreds.password, sdkDebug);
   logger.info('Authenticated.');
 
   return client;

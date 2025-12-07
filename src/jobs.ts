@@ -31,13 +31,28 @@ const RETRY_DELAYS_SEC = [
   604800, // ~1 week (cap)
 ];
 
-const MAX_RETRIES = RETRY_DELAYS_SEC.length;
-
-// Jitter as percentage of retry delay (0.25 = 25%)
 const JITTER_FACTOR = 0.25;
-
-// Stale processing job threshold in milliseconds (2 minutes)
 const STALE_PROCESSING_MS = 2 * 60 * 1000;
+const NETWORK_RETRY_CAP_INDEX = 4;
+const DRAFT_REVISION_RETRY_SEC = 128;
+
+export const ErrorCategory = {
+  NETWORK: 'network',
+  DRAFT_REVISION: 'draft_revision',
+  OTHER: 'other',
+} as const;
+export type ErrorCategory = (typeof ErrorCategory)[keyof typeof ErrorCategory];
+
+export interface ErrorClassification {
+  category: ErrorCategory;
+  maxRetries: number;
+}
+
+const MAX_RETRIES: Record<ErrorCategory, number> = {
+  [ErrorCategory.OTHER]: RETRY_DELAYS_SEC.length,
+  [ErrorCategory.DRAFT_REVISION]: 7,
+  [ErrorCategory.NETWORK]: Infinity,
+};
 
 // ============================================================================
 // Job Queue Functions
@@ -178,6 +193,28 @@ export function markJobSynced(jobId: number, localPath: string, dryRun: boolean)
 
   // Always remove from processing queue
   db.delete(schema.processingQueue).where(eq(schema.processingQueue.localPath, localPath)).run();
+
+  // Cleanup: if more than 256 SYNCED jobs, delete the oldest 128
+  const syncedCount = db
+    .select()
+    .from(schema.syncJobs)
+    .where(eq(schema.syncJobs.status, SyncJobStatus.SYNCED))
+    .all().length;
+
+  if (syncedCount > 256) {
+    const oldestSynced = db
+      .select({ id: schema.syncJobs.id })
+      .from(schema.syncJobs)
+      .where(eq(schema.syncJobs.status, SyncJobStatus.SYNCED))
+      .orderBy(schema.syncJobs.id)
+      .limit(128)
+      .all();
+
+    const idsToDelete = oldestSynced.map((row) => row.id);
+    db.delete(schema.syncJobs).where(inArray(schema.syncJobs.id, idsToDelete)).run();
+
+    logger.debug(`Cleaned up ${idsToDelete.length} old SYNCED jobs`);
+  }
 }
 
 /**
@@ -207,6 +244,15 @@ export function markJobBlocked(
 }
 
 /**
+ * Set the last error message for a job.
+ * No-op if dryRun is true.
+ */
+function setJobError(jobId: number, error: string, dryRun: boolean): void {
+  if (dryRun) return;
+  db.update(schema.syncJobs).set({ lastError: error }).where(eq(schema.syncJobs.id, jobId)).run();
+}
+
+/**
  * Mark a job as processing (in-flight).
  * Also upserts into processing_queue to track active processing.
  * No-op if dryRun is true.
@@ -232,11 +278,19 @@ export function markJobProcessing(jobId: number, localPath: string, dryRun: bool
     .run();
 }
 
-// Index in RETRY_DELAYS_SEC for 256s (~4 min) - network errors cap here
-const NETWORK_RETRY_CAP_INDEX = 4;
+/** Categorize an error message and return category with max retries */
+function categorizeError(error: string): ErrorClassification {
+  const lowerError = error.toLowerCase();
 
-/** Check if an error message indicates a transient/retryable error */
-function isNetworkError(error: string): boolean {
+  // Check for draft revision error first (more specific)
+  if (lowerError.includes('draft revision already exists')) {
+    return {
+      category: ErrorCategory.DRAFT_REVISION,
+      maxRetries: MAX_RETRIES[ErrorCategory.DRAFT_REVISION],
+    };
+  }
+
+  // Check for network-related errors
   const networkPatterns = [
     'ECONNREFUSED',
     'ECONNRESET',
@@ -249,15 +303,26 @@ function isNetworkError(error: string): boolean {
     'network',
     'timeout',
     'connection',
-    'Draft revision already exists', // A previous upload is still pending, but likely hung
   ];
-  const lowerError = error.toLowerCase();
-  return networkPatterns.some((pattern) => lowerError.includes(pattern.toLowerCase()));
+  if (networkPatterns.some((pattern) => lowerError.includes(pattern.toLowerCase()))) {
+    return {
+      category: ErrorCategory.NETWORK,
+      maxRetries: MAX_RETRIES[ErrorCategory.NETWORK],
+    };
+  }
+
+  return {
+    category: ErrorCategory.OTHER,
+    maxRetries: MAX_RETRIES[ErrorCategory.OTHER],
+  };
 }
 
 /**
  * Schedule a job for retry with exponential backoff and jitter.
- * Network errors are retried indefinitely at max ~4 min intervals.
+ * Retry strategy depends on error category:
+ * - OTHER: normal backoff, blocks after MAX_RETRIES
+ * - NETWORK: backoff capped at 256s, retries indefinitely
+ * - DRAFT_REVISION: fixed 128s delay, retries indefinitely
  * Also removes from processing_queue.
  * No-op if dryRun is true.
  */
@@ -265,35 +330,44 @@ export function scheduleRetry(
   jobId: number,
   localPath: string,
   nRetries: number,
-  error: string,
-  isNetworkError: boolean,
+  errorCategory: ErrorCategory,
   dryRun: boolean
 ): void {
   if (dryRun) return;
 
-  // For network errors, cap delay at 256s (~4 min) and don't increment retries beyond that
-  const effectiveRetries = isNetworkError ? Math.min(nRetries, NETWORK_RETRY_CAP_INDEX) : nRetries;
+  let delaySec: number;
+  let newRetries: number;
 
-  // Get delay from array (use last value if beyond array length)
-  const delayIndex = Math.min(effectiveRetries, RETRY_DELAYS_SEC.length - 1);
-  const baseDelaySec = RETRY_DELAYS_SEC[delayIndex];
+  if (errorCategory === ErrorCategory.DRAFT_REVISION) {
+    // Fixed 128s delay for draft revision errors
+    delaySec = DRAFT_REVISION_RETRY_SEC;
+    // Don't increment retries (retry indefinitely)
+    newRetries = nRetries;
+  } else if (errorCategory === ErrorCategory.NETWORK) {
+    // Network errors: backoff capped at 256s
+    const effectiveRetries = Math.min(nRetries, NETWORK_RETRY_CAP_INDEX);
+    const delayIndex = Math.min(effectiveRetries, RETRY_DELAYS_SEC.length - 1);
+    const baseDelaySec = RETRY_DELAYS_SEC[delayIndex];
+    const jitterSec = baseDelaySec * JITTER_FACTOR * (Math.random() * 2 - 1);
+    delaySec = Math.max(1, baseDelaySec + jitterSec);
+    // Cap retries to not increment beyond the cap (retry indefinitely)
+    newRetries = Math.min(nRetries + 1, NETWORK_RETRY_CAP_INDEX + 1);
+  } else {
+    // OTHER: normal backoff
+    const delayIndex = Math.min(nRetries, RETRY_DELAYS_SEC.length - 1);
+    const baseDelaySec = RETRY_DELAYS_SEC[delayIndex];
+    const jitterSec = baseDelaySec * JITTER_FACTOR * (Math.random() * 2 - 1);
+    delaySec = Math.max(1, baseDelaySec + jitterSec);
+    newRetries = nRetries + 1;
+  }
 
-  // Add jitter (±JITTER_FACTOR of base delay)
-  const jitterSec = baseDelaySec * JITTER_FACTOR * (Math.random() * 2 - 1);
-  const delaySec = Math.max(1, baseDelaySec + jitterSec);
   const retryAt = new Date(Date.now() + delaySec * 1000);
-
-  // For network errors, don't increment nRetries beyond the cap (retry indefinitely)
-  const newRetries = isNetworkError
-    ? Math.min(nRetries + 1, NETWORK_RETRY_CAP_INDEX + 1)
-    : nRetries + 1;
 
   db.update(schema.syncJobs)
     .set({
       status: SyncJobStatus.PENDING,
       nRetries: newRetries,
       retryAt,
-      lastError: error,
     })
     .where(eq(schema.syncJobs.id, jobId))
     .run();
@@ -302,6 +376,49 @@ export function scheduleRetry(
   db.delete(schema.processingQueue).where(eq(schema.processingQueue.localPath, localPath)).run();
 
   logger.info(`Job ${jobId} scheduled for retry in ${Math.round(delaySec)}s`);
+}
+
+/** Helper to delete a node, throws on failure */
+async function deleteNodeOrThrow(
+  client: ProtonDriveClient,
+  remotePath: string
+): Promise<{ existed: boolean }> {
+  const result = await deleteNode(client, remotePath, false);
+  if (!result.success) {
+    throw new Error(result.error);
+  }
+  return { existed: result.existed };
+}
+
+/** Helper to create/update a node, throws on failure */
+async function createNodeOrThrow(
+  client: ProtonDriveClient,
+  localPath: string,
+  remotePath: string
+): Promise<string> {
+  const result = await createNode(client, localPath, remotePath);
+  if (!result.success) {
+    throw new Error(result.error);
+  }
+  return result.nodeUid!;
+}
+
+/** Helper to delete and recreate a node */
+async function deleteAndRecreateNode(
+  client: ProtonDriveClient,
+  localPath: string,
+  remotePath: string
+): Promise<string> {
+  await deleteNodeOrThrow(client, remotePath);
+  logger.info(`Deleted node ${remotePath}, now recreating`);
+  const nodeUid = await createNodeOrThrow(client, localPath, remotePath);
+  logger.info(`Successfully recreated node: ${remotePath} -> ${nodeUid}`);
+  return nodeUid;
+}
+
+/** Extract error message from unknown error */
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
@@ -314,53 +431,49 @@ export async function processNextJob(client: ProtonDriveClient, dryRun: boolean)
 
   const { id, eventType, localPath, remotePath, nRetries } = job;
 
-  // Mark as PROCESSING immediately to prevent other workers from picking it up
   markJobProcessing(id, localPath, dryRun);
 
   try {
     if (eventType === SyncEventType.DELETE) {
       logger.info(`Deleting: ${remotePath}`);
-      const result = await deleteNode(client, remotePath, false);
-
-      if (!result.success) {
-        throw new Error(result.error);
-      }
-
-      if (result.existed) {
-        logger.info(`Deleted: ${remotePath}`);
-      } else {
-        logger.info(`Already gone: ${remotePath}`);
-      }
+      const { existed } = await deleteNodeOrThrow(client, remotePath);
+      logger.info(existed ? `Deleted: ${remotePath}` : `Already gone: ${remotePath}`);
     } else {
-      // CREATE or UPDATE
       const typeLabel = eventType === SyncEventType.CREATE ? 'Creating' : 'Updating';
-
       logger.info(`${typeLabel}: ${remotePath}`);
-      const result = await createNode(client, localPath, remotePath);
-
-      if (!result.success) {
-        throw new Error(result.error);
-      }
-
-      logger.info(`Success: ${remotePath} -> ${result.nodeUid}`);
+      const nodeUid = await createNodeOrThrow(client, localPath, remotePath);
+      logger.info(`Success: ${remotePath} -> ${nodeUid}`);
     }
 
-    // Job completed successfully
     markJobSynced(id, localPath, dryRun);
-
     return true;
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const networkError = isNetworkError(errorMessage);
+    const errorMessage = getErrorMessage(error);
+    const { category: errorCategory, maxRetries } = categorizeError(errorMessage);
 
-    if (!networkError && nRetries >= MAX_RETRIES) {
+    setJobError(id, errorMessage, dryRun);
+
+    if (errorCategory === ErrorCategory.OTHER && nRetries >= maxRetries) {
       logger.error(
-        `Job ${id} (${localPath}) failed permanently after ${MAX_RETRIES} retries: ${errorMessage}`
+        `Job ${id} (${localPath}) failed permanently after ${maxRetries} retries: ${errorMessage}`
       );
       markJobBlocked(id, localPath, errorMessage, dryRun);
+    } else if (errorCategory === ErrorCategory.DRAFT_REVISION && nRetries >= maxRetries) {
+      logger.warn(
+        `Job ${id} (${localPath}) hit max draft revision retries (${maxRetries}), deleting and recreating`
+      );
+      try {
+        await deleteAndRecreateNode(client, localPath, remotePath);
+        markJobSynced(id, localPath, dryRun);
+      } catch (recreateError) {
+        const recreateErrorMsg = getErrorMessage(recreateError);
+        logger.error(`Failed to delete+recreate node: ${recreateErrorMsg}`);
+        setJobError(id, recreateErrorMsg, dryRun);
+        scheduleRetry(id, localPath, 0, errorCategory, dryRun);
+      }
     } else {
       logger.error(`Job ${id} (${localPath}) failed: ${errorMessage}`);
-      scheduleRetry(id, localPath, nRetries, errorMessage, networkError, dryRun);
+      scheduleRetry(id, localPath, nRetries, errorCategory, dryRun);
     }
 
     return true;

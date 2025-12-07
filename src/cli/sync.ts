@@ -325,6 +325,7 @@ async function setupWatchmanDaemon(config: Config): Promise<void> {
  */
 function startJobProcessor(): NodeJS.Timeout {
   return setInterval(async () => {
+    logger.debug('Job processor polling...');
     if (!protonClient) return;
     const processed = await processAllPendingJobs(protonClient, dryRun);
     if (processed > 0) {
@@ -341,11 +342,18 @@ export async function startCommand(options: {
   dryRun: boolean;
   watch: boolean;
   daemon: boolean;
-  debug: boolean;
+  debug: number;
 }): Promise<void> {
-  // Enable debug logging if requested
-  if (options.debug) {
+  // Enable debug logging if requested (--debug)
+  // Level 1 = app debug, Level 2+ = app debug + Proton Drive SDK debug
+  const sdkDebug = options.debug >= 2;
+  if (options.debug >= 1) {
     enableDebug();
+    if (sdkDebug) {
+      logger.debug('Debug level 2: app debug + Proton Drive SDK debug enabled');
+    } else {
+      logger.debug('Debug level 1: app debug enabled');
+    }
   }
 
   // Validate: --daemon requires --watch
@@ -384,7 +392,7 @@ export async function startCommand(options: {
   remoteRoot = config.remote_root;
 
   // Authenticate using stored credentials
-  protonClient = await authenticateFromKeychain();
+  protonClient = await authenticateFromKeychain(sdkDebug);
 
   if (watchMode) {
     // Watch mode: use subscriptions and keep running
