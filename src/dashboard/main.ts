@@ -58,10 +58,6 @@ process.on(
       currentAuthStatus = {
         status: msg.status!,
         username: msg.username,
-        attempt: msg.attempt,
-        maxAttempts: msg.maxAttempts,
-        error: msg.error,
-        nextRetryMs: msg.nextRetryMs,
       };
       authEvents.emit('auth', currentAuthStatus);
     }

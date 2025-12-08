@@ -30,10 +30,6 @@ export type AuthStatus = 'pending' | 'authenticating' | 'authenticated' | 'faile
 export interface AuthStatusUpdate {
   status: AuthStatus;
   username?: string;
-  attempt?: number;
-  maxAttempts?: number;
-  error?: string;
-  nextRetryMs?: number;
 }
 
 // ============================================================================

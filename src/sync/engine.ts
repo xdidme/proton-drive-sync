@@ -8,7 +8,7 @@ import { join, basename } from 'path';
 import { SyncEventType } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { registerSignalHandler } from '../signals.js';
-import { startDashboard, stopDashboard } from '../dashboard/server.js';
+import { stopDashboard } from '../dashboard/server.js';
 import type { Config } from '../config.js';
 import type { ProtonDriveClient } from '../proton/types.js';
 import {
@@ -119,9 +119,6 @@ export async function runWatchMode(options: SyncOptions): Promise<void> {
   const { config, client, dryRun } = options;
 
   await waitForWatchman();
-
-  // Start the dashboard
-  startDashboard(dryRun);
 
   // Set up file watching
   await setupWatchSubscriptions(config, (file) => handleFileChange(file, config, dryRun), dryRun);

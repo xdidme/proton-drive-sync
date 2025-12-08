@@ -41,7 +41,7 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
   const storedCreds = await getStoredCredentials();
 
   if (!storedCreds) {
-    sendAuthStatus({ status: 'failed', error: 'No credentials found' });
+    sendAuthStatus({ status: 'failed' });
     logger.error('No credentials found. Run `proton-drive-sync auth` first.');
     process.exit(1);
   }
@@ -56,8 +56,6 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
     sendAuthStatus({
       status: 'authenticating',
       username: storedCreds.username,
-      attempt: attempt + 1,
-      maxAttempts: MAX_RETRIES,
     });
 
     try {
@@ -73,7 +71,6 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
         sendAuthStatus({
           status: 'failed',
           username: storedCreds.username,
-          error: lastError.message,
         });
         throw lastError;
       }
@@ -83,10 +80,6 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
         sendAuthStatus({
           status: 'authenticating',
           username: storedCreds.username,
-          attempt: attempt + 1,
-          maxAttempts: MAX_RETRIES,
-          error: 'Network error, retrying...',
-          nextRetryMs: delayMs,
         });
         logger.warn(
           `Authentication failed (attempt ${attempt + 1}/${MAX_RETRIES}), retrying in ${delayMs / 1000}s...`
@@ -99,7 +92,6 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
   sendAuthStatus({
     status: 'failed',
     username: storedCreds.username,
-    error: lastError?.message || 'Max retries exceeded',
   });
   throw lastError;
 }

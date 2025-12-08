@@ -93,8 +93,9 @@
         </div>
 
         <div class="flex items-center gap-4">
-          <!-- Auth Status -->
+          <!-- Auth Status (hidden when disconnected) -->
           <div
+            x-show="connected"
             class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-900 border border-gray-700 transition-colors duration-300"
             :class="{
               'border-green-500/30 bg-green-500/10': auth.status === 'authenticated',
@@ -182,9 +183,7 @@
                 <span>Waiting for auth...</span>
               </template>
               <template x-if="auth.status === 'authenticating'">
-                <span
-                  x-text="'Authenticating... (' + (auth.attempt || 1) + '/' + (auth.maxAttempts || 5) + ')'"
-                ></span>
+                <span>Authenticating...</span>
               </template>
               <template x-if="auth.status === 'authenticated'">
                 <span x-text="'Authenticated as: ' + (auth.username || 'User')"></span>
@@ -653,8 +652,6 @@
           auth: {
             status: 'pending',
             username: null,
-            attempt: null,
-            maxAttempts: null,
             error: null,
           },
           stats: { pending: 0, processing: 0, synced: 0, blocked: 0 },
@@ -760,6 +757,9 @@
           },
 
           connectEvents() {
+            if (this.eventsSource) {
+              this.eventsSource.close();
+            }
             this.eventsSource = new EventSource('/api/events');
             this.eventsSource.onopen = () => {
               this.connected = true;
@@ -825,6 +825,9 @@
           },
 
           connectLogs() {
+            if (this.logsSource) {
+              this.logsSource.close();
+            }
             this.logsSource = new EventSource('/api/logs');
             this.logsSource.onopen = () => {
               this.logsRetryDelay = 1000; // Reset backoff on success
