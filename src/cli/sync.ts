@@ -11,10 +11,12 @@ import { loadConfig, type Config } from '../config.js';
 import { logger, disableConsoleLogging, enableDebug, setDryRun } from '../logger.js';
 import { authenticateFromKeychain } from './auth.js';
 import {
-  isAlreadyRunning,
-  registerSignalHandler,
+  acquireRunLock,
+  releaseRunLock,
   startSignalListener,
   stopSignalListener,
+  registerSignalHandler,
+  unregisterSignalHandler,
 } from '../signals.js';
 import { enqueueJob, processAllPendingJobs } from '../jobs.js';
 import { SyncEventType } from '../db/schema.js';
@@ -397,8 +399,8 @@ export async function startCommand(options: {
   // Wait for watchman to be ready
   await waitForWatchman();
 
-  // Check if another proton-drive-sync instance is already running
-  if (isAlreadyRunning(true)) {
+  // Acquire run lock (checks if another instance running, clears stale signals, marks as running)
+  if (!acquireRunLock()) {
     console.error(
       'Error: Another proton-drive-sync instance is already running. Run `proton-drive-sync stop` first.'
     );
@@ -446,27 +448,34 @@ export async function startCommand(options: {
     // Start dashboard server
     startDashboard();
 
+    // Shared cleanup function
+    const cleanup = (): void => {
+      stopSignalListener();
+      unregisterSignalHandler('stop', handleStop);
+      process.off('SIGINT', handleSigint);
+      jobProcessor.stop();
+      stopDashboard();
+      watchmanClient.end();
+      releaseRunLock();
+    };
+
     // Register stop signal handler
     const handleStop = (): void => {
       logger.info('Stop signal received. Shutting down...');
-      stopSignalListener();
-      jobProcessor.stop();
-      stopDashboard();
-      watchmanClient.end();
+      cleanup();
       process.exit(0);
     };
-    registerSignalHandler('stop', handleStop);
-    startSignalListener();
 
     // Handle graceful shutdown
-    process.on('SIGINT', () => {
-      stopSignalListener();
-      jobProcessor.stop();
-      stopDashboard();
+    const handleSigint = (): void => {
       logger.info('Shutting down...');
-      watchmanClient.end();
+      cleanup();
       process.exit(0);
-    });
+    };
+
+    registerSignalHandler('stop', handleStop);
+    startSignalListener();
+    process.on('SIGINT', handleSigint);
   } else {
     // One-shot mode: query for changes, process, and exit
     await runOneShotSync(config);

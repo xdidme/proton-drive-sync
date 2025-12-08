@@ -7,13 +7,7 @@ import { execSync } from 'child_process';
 import { join } from 'path';
 import { homedir } from 'os';
 import * as readline from 'readline';
-import {
-  sendSignal,
-  hasSignal,
-  consumeSignal,
-  killSyncProcesses,
-  isAlreadyRunning,
-} from '../signals.js';
+import { sendSignal, hasSignal, consumeSignal, isAlreadyRunning } from '../signals.js';
 
 function askYesNo(question: string): Promise<boolean> {
   const rl = readline.createInterface({
@@ -278,8 +272,8 @@ export function serviceUnloadCommand(): void {
     }
   }
 
-  // Kill any straggler processes
-  killSyncProcesses();
+  // Send stop signal to any running process
+  sendSignal('stop');
 
   console.log('Service stopped and unloaded. Run `proton-drive-sync service start` to restart.');
 }
