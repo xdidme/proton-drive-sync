@@ -116,8 +116,33 @@ export async function authenticateFromKeychain(sdkDebug = false): Promise<Proton
   }
 
   logger.info(`Authenticating as ${storedCreds.username}...`);
-  const client = await createClient(storedCreds.username, storedCreds.password, sdkDebug);
-  logger.info('Authenticated.');
 
-  return client;
+  // Retry with exponential backoff: 1s, 4s, 16s, 64s, 256s
+  const MAX_RETRIES = 5;
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const client = await createClient(storedCreds.username, storedCreds.password, sdkDebug);
+      logger.info('Authenticated.');
+      return client;
+    } catch (error) {
+      lastError = error as Error;
+
+      // Only retry on network errors (fetch failed)
+      if (!lastError.message.includes('fetch failed')) {
+        throw lastError;
+      }
+
+      if (attempt < MAX_RETRIES - 1) {
+        const delayMs = Math.pow(4, attempt) * 1000; // 1s, 4s, 16s, 64s
+        logger.warn(
+          `Authentication failed (attempt ${attempt + 1}/${MAX_RETRIES}), retrying in ${delayMs / 1000}s...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
+  throw lastError;
 }
