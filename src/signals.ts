@@ -86,9 +86,9 @@ export function startSignalListener(): void {
     for (const row of rows) {
       // Check if anyone is listening for this signal
       if (signalEmitter.listenerCount(row.signal) > 0) {
-        signalEmitter.emit(row.signal);
-        // Consume the signal after broadcasting
+        // Consume the signal BEFORE broadcasting (handler may exit process)
         db.delete(schema.signals).where(eq(schema.signals.id, row.id)).run();
+        signalEmitter.emit(row.signal);
       }
     }
   }, SIGNAL_POLL_INTERVAL_MS);
