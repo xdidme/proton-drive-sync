@@ -569,6 +569,7 @@
           },
 
           async fetchAll() {
+            console.log('[fetchAll] START');
             try {
               const [statsRes, recentRes, blockedRes, processingRes] = await Promise.all([
                 fetch('/api/stats'),
@@ -584,6 +585,7 @@
             } catch (err) {
               console.error('Failed to fetch data:', err);
             }
+            console.log('[fetchAll] END');
           },
 
           connectEvents() {
@@ -598,27 +600,52 @@
             this.eventsSource.addEventListener('stats', (e) => {
               this.stats = JSON.parse(e.data);
             });
-            this.eventsSource.addEventListener('job', (e) => {
-              const event = JSON.parse(e.data);
-              // Update stats from event if included (avoids extra API call)
-              if (event.stats) {
-                this.stats = event.stats;
-              }
-              // Debounce fetchAll to avoid thundering herd during rapid syncs
-              this.scheduleFetchAll();
+            this.eventsSource.addEventListener('diff', (e) => {
+              const diff = JSON.parse(e.data);
+              this.applyDiff(diff);
             });
           },
 
-          // Debounced fetch - waits 500ms of idle before fetching
-          fetchAllTimeout: null,
-          scheduleFetchAll() {
-            if (this.fetchAllTimeout) {
-              clearTimeout(this.fetchAllTimeout);
+          /**
+           * Apply a diff to update stats and job lists incrementally.
+           * This avoids refetching all data on every change.
+           */
+          applyDiff(diff) {
+            // Apply stats deltas
+            this.stats.pending += diff.statsDelta.pending;
+            this.stats.processing += diff.statsDelta.processing;
+            this.stats.synced += diff.statsDelta.synced;
+            this.stats.blocked += diff.statsDelta.blocked;
+
+            // Ensure stats don't go negative (edge case protection)
+            this.stats.pending = Math.max(0, this.stats.pending);
+            this.stats.processing = Math.max(0, this.stats.processing);
+            this.stats.synced = Math.max(0, this.stats.synced);
+            this.stats.blocked = Math.max(0, this.stats.blocked);
+
+            // Remove jobs from processing list
+            if (diff.removeProcessing.length > 0) {
+              const removeSet = new Set(diff.removeProcessing);
+              this.processing = this.processing.filter((job) => !removeSet.has(job.id));
             }
-            this.fetchAllTimeout = setTimeout(() => {
-              this.fetchAll();
-              this.fetchAllTimeout = null;
-            }, 500);
+
+            // Add jobs to processing list
+            for (const job of diff.addProcessing) {
+              this.processing.push(job);
+            }
+
+            // Add jobs to recent list (prepend, keep max 50)
+            for (const job of diff.addRecent) {
+              this.recent.unshift(job);
+            }
+            if (this.recent.length > 50) {
+              this.recent = this.recent.slice(0, 50);
+            }
+
+            // Add jobs to blocked list
+            for (const job of diff.addBlocked) {
+              this.blocked.push(job);
+            }
           },
 
           connectLogs() {

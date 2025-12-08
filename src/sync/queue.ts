@@ -25,7 +25,6 @@ export interface JobEvent {
   remotePath?: string;
   error?: string;
   timestamp: Date;
-  stats?: { pending: number; processing: number; synced: number; blocked: number };
 }
 
 // ============================================================================
@@ -160,7 +159,6 @@ export function enqueueJob(
     localPath: params.localPath,
     remotePath: params.remotePath,
     timestamp: new Date(),
-    stats: getJobCounts(),
   } satisfies JobEvent);
 }
 
@@ -205,16 +203,36 @@ export function getNextPendingJob(dryRun: boolean = false): Job | undefined {
   }
 
   // NORMAL MODE
+  // Clean up stale processing entries and reset jobs back to PENDING
+  // This handles jobs left in PROCESSING state due to crashes/restarts
   const staleThreshold = new Date(Date.now() - STALE_PROCESSING_MS);
+  const staleReset = db.transaction((tx) => {
+    const reset = tx
+      .update(schema.syncJobs)
+      .set({ status: SyncJobStatus.PENDING })
+      .where(
+        and(
+          eq(schema.syncJobs.status, SyncJobStatus.PROCESSING),
+          inArray(
+            schema.syncJobs.localPath,
+            tx
+              .select({ localPath: schema.processingQueue.localPath })
+              .from(schema.processingQueue)
+              .where(lte(schema.processingQueue.startedAt, staleThreshold))
+          )
+        )
+      )
+      .run();
 
-  // Clean up stale entries from processing queue
-  const staleCleanup = db
-    .delete(schema.processingQueue)
-    .where(lte(schema.processingQueue.startedAt, staleThreshold))
-    .run();
+    tx.delete(schema.processingQueue)
+      .where(lte(schema.processingQueue.startedAt, staleThreshold))
+      .run();
 
-  if (staleCleanup.changes > 0) {
-    logger.debug(`Cleaned up ${staleCleanup.changes} stale processing queue entries`);
+    return reset.changes;
+  });
+
+  if (staleReset > 0) {
+    logger.debug(`Reset ${staleReset} stale processing jobs back to PENDING`);
   }
 
   // Transaction: select next PENDING job and mark as PROCESSING atomically
@@ -293,7 +311,6 @@ export function markJobSynced(jobId: number, localPath: string, dryRun: boolean)
     jobId,
     localPath,
     timestamp: new Date(),
-    stats: getJobCounts(),
   } satisfies JobEvent);
 
   // Cleanup old SYNCED jobs (watermark: 1280)
@@ -350,7 +367,6 @@ export function markJobBlocked(
     localPath,
     error,
     timestamp: new Date(),
-    stats: getJobCounts(),
   } satisfies JobEvent);
 }
 
@@ -451,7 +467,6 @@ export function scheduleRetry(
     jobId,
     localPath,
     timestamp: new Date(),
-    stats: getJobCounts(),
   } satisfies JobEvent);
 
   logger.info(`Job ${jobId} scheduled for retry in ${Math.round(delaySec)}s`);

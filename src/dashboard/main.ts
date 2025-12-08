@@ -2,7 +2,7 @@
  * Dashboard Subprocess Entry Point
  *
  * This file runs as a separate Node.js process, forked from the main sync process.
- * It communicates with the parent via IPC for job events.
+ * It communicates with the parent via IPC for job events (received as diffs).
  */
 
 import { Hono } from 'hono';
@@ -15,13 +15,8 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { xdgState } from 'xdg-basedir';
 import { EventEmitter } from 'events';
-import {
-  getJobCounts,
-  getRecentJobs,
-  getBlockedJobs,
-  getProcessingJobs,
-  type JobEvent,
-} from '../sync/queue.js';
+import { getJobCounts, getRecentJobs, getBlockedJobs, getProcessingJobs } from '../sync/queue.js';
+import type { DashboardDiff } from './server.js';
 
 // ============================================================================
 // Constants
@@ -37,12 +32,12 @@ const LOG_FILE = join(xdgState || '', 'proton-drive-sync', 'sync.log');
 // ============================================================================
 
 // Local event emitter to bridge IPC messages to SSE streams
-const jobEvents = new EventEmitter();
+const diffEvents = new EventEmitter();
 
-// Listen for job events from parent process via IPC
-process.on('message', (msg: { type: string; event?: JobEvent; dryRun?: boolean }) => {
-  if (msg.type === 'job' && msg.event) {
-    jobEvents.emit('job', msg.event);
+// Listen for diff events from parent process via IPC
+process.on('message', (msg: { type: string; diff?: DashboardDiff; dryRun?: boolean }) => {
+  if (msg.type === 'diff' && msg.diff) {
+    diffEvents.emit('diff', msg.diff);
   } else if (msg.type === 'config' && msg.dryRun !== undefined) {
     isDryRun = msg.dryRun;
   }
@@ -99,17 +94,17 @@ app.get('/api/config', (c) => {
 // SSE Endpoints
 // ============================================================================
 
-// GET /api/events - SSE stream of job state changes
+// GET /api/events - SSE stream of job state changes (diffs)
 app.get('/api/events', async (c) => {
   return streamSSE(c, async (stream) => {
-    const handler = (event: JobEvent) => {
+    const handler = (diff: DashboardDiff) => {
       stream.writeSSE({
-        event: 'job',
-        data: JSON.stringify(event),
+        event: 'diff',
+        data: JSON.stringify(diff),
       });
     };
 
-    jobEvents.on('job', handler);
+    diffEvents.on('diff', handler);
 
     // Send initial stats
     await stream.writeSSE({
@@ -125,7 +120,7 @@ app.get('/api/events', async (c) => {
     // Cleanup on close
     stream.onAbort(() => {
       clearInterval(heartbeat);
-      jobEvents.off('job', handler);
+      diffEvents.off('diff', handler);
     });
 
     // Keep the stream open
