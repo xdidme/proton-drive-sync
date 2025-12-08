@@ -206,21 +206,21 @@ export function markJobSynced(jobId: number, localPath: string, dryRun: boolean)
     tx.delete(schema.processingQueue).where(eq(schema.processingQueue.localPath, localPath)).run();
   });
 
-  // Separate transaction: cleanup old SYNCED jobs (if more than 256, delete oldest 128)
+  // Separate transaction: cleanup old SYNCED jobs (low watermark: 1024, high watermark: 1280)
   const syncedCount = db
     .select()
     .from(schema.syncJobs)
     .where(eq(schema.syncJobs.status, SyncJobStatus.SYNCED))
     .all().length;
 
-  if (syncedCount > 256) {
+  if (syncedCount > 1280) {
     db.transaction((tx) => {
       const oldestSynced = tx
         .select({ id: schema.syncJobs.id })
         .from(schema.syncJobs)
         .where(eq(schema.syncJobs.status, SyncJobStatus.SYNCED))
         .orderBy(schema.syncJobs.id)
-        .limit(128)
+        .limit(256)
         .all();
 
       const idsToDelete = oldestSynced.map((row) => row.id);
