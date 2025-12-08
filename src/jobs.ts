@@ -8,11 +8,11 @@ import { EventEmitter } from 'events';
 import { eq, and, lte, inArray, isNull, sql } from 'drizzle-orm';
 import { db, schema } from './db/index.js';
 import { SyncJobStatus, SyncEventType } from './db/schema.js';
-import { createNode } from './api/create.js';
-import { deleteNode } from './api/delete.js';
+import { createNode } from './proton/create.js';
+import { deleteNode } from './proton/delete.js';
 import { logger, isDebugEnabled } from './logger.js';
 import { registerSignalHandler, unregisterSignalHandler } from './signals.js';
-import type { ProtonDriveClient } from './api/types.js';
+import type { ProtonDriveClient } from './proton/types.js';
 
 // ============================================================================
 // Event Emitter for Dashboard

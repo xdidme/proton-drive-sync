@@ -211,8 +211,6 @@ if (process.send) {
   process.send({ type: 'ready', port: DASHBOARD_PORT });
 }
 
-console.log(`Dashboard running at http://localhost:${DASHBOARD_PORT}`);
-
 // Graceful shutdown
 process.on('SIGTERM', () => {
   server.close();

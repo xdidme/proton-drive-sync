@@ -14,7 +14,7 @@ export {
   traverseRemotePath,
   nodeStreamToWebStream,
   formatSize,
-} from './api_helpers.js';
+} from './utils.js';
 export type {
   NodeData,
   NodeResult,

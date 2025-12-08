@@ -21,7 +21,7 @@ import {
 import { enqueueJob, processAllPendingJobs } from '../jobs.js';
 import { SyncEventType } from '../db/schema.js';
 import { startDashboard, stopDashboard } from '../dashboard/server.js';
-import type { ProtonDriveClient } from '../api/types.js';
+import type { ProtonDriveClient } from '../proton/types.js';
 
 // ============================================================================
 // Types
