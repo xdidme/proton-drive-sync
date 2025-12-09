@@ -3,6 +3,8 @@
  *
  * This file runs as a separate Node.js process, forked from the main sync process.
  * It communicates with the parent via IPC for job events (received as diffs).
+ *
+ * Sends JSON events via SSE and uses Alpine.js client-side to apply diffs incrementally.
  */
 
 import { Hono } from 'hono';
