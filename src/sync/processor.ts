@@ -137,7 +137,7 @@ export async function processNextJob(client: ProtonDriveClient, dryRun: boolean)
 
 /**
  * Process all pending jobs in the queue with concurrency.
- * Stops processing if a stop signal is received.
+ * Stops processing if a stop or pause signal is received.
  * Returns the number of jobs processed.
  */
 export async function processAllPendingJobs(
@@ -151,7 +151,11 @@ export async function processAllPendingJobs(
   const handleStop = (): void => {
     stopRequested = true;
   };
+  const handlePause = (): void => {
+    stopRequested = true;
+  };
   registerSignalHandler('stop', handleStop);
+  registerSignalHandler('pause-sync', handlePause);
 
   try {
     // Process jobs with up to sync_concurrency in parallel using a worker pool pattern
@@ -181,6 +185,7 @@ export async function processAllPendingJobs(
     }
   } finally {
     unregisterSignalHandler('stop', handleStop);
+    unregisterSignalHandler('pause-sync', handlePause);
   }
 
   return count;

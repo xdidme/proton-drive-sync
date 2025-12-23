@@ -74,16 +74,6 @@ export function hasSignal(signal: string): boolean {
 }
 
 /**
- * Remove a signal from the queue (cleanup on timeout).
- */
-export function consumeSignal(signal: string): boolean {
-  const row = db.select().from(schema.signals).where(eq(schema.signals.signal, signal)).get();
-  if (!row) return false;
-  db.delete(schema.signals).where(eq(schema.signals.id, row.id)).run();
-  return true;
-}
-
-/**
  * Register a handler for a specific signal. Handler is called when signal is detected.
  */
 export function registerSignalHandler(signal: string, handler: () => void): void {

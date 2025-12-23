@@ -7,7 +7,7 @@
 import { join, basename } from 'path';
 import { SyncEventType } from '../db/schema.js';
 import { logger } from '../logger.js';
-import { registerSignalHandler, sendSignal, consumeSignal } from '../signals.js';
+import { registerSignalHandler } from '../signals.js';
 import { stopDashboard } from '../dashboard/server.js';
 import type { Config } from '../config.js';
 import type { ProtonDriveClient } from '../proton/types.js';
@@ -176,13 +176,11 @@ function startJobProcessorLoop(
   // Register pause/resume signal handlers
   const handlePause = (): void => {
     paused = true;
-    sendSignal('paused');
     logger.info('Sync paused');
   };
 
   const handleResume = (): void => {
     paused = false;
-    consumeSignal('paused');
     logger.info('Sync resumed');
   };
 
@@ -229,8 +227,6 @@ function startJobProcessorLoop(
         clearTimeout(timeoutId);
         timeoutId = null;
       }
-      // Clean up paused signal if we're stopping while paused
-      consumeSignal('paused');
     },
     isPaused: () => paused,
   };
