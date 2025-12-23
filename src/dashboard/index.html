@@ -102,6 +102,15 @@
 
     <main class="flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-6 lg:p-8">
       <div class="max-w-7xl mx-auto space-y-8">
+        <!-- Config Info -->
+        <div
+          id="config-info"
+          hx-get="/api/fragments/config-info"
+          hx-trigger="load"
+          hx-swap="innerHTML"
+          class="bg-gray-800/50 border border-gray-700/50 rounded-lg p-4 -mt-2 shadow-sm"
+        ></div>
+
         <!-- Stats Overview -->
         <div
           id="stats"
@@ -382,6 +391,16 @@
         `;
         document.getElementById('connection-status').className =
           'flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-900 border border-red-500/30 bg-red-500/10';
+
+        // Stop activity indicators
+        document.querySelectorAll('.animate-pulse').forEach((el) => {
+          el.classList.remove('animate-pulse');
+          el.classList.add('opacity-50');
+        });
+        document.querySelectorAll('.animate-spin').forEach((el) => {
+          el.classList.remove('animate-spin');
+          el.classList.add('opacity-50');
+        });
       });
 
       // Clear "Waiting for logs..." on first log

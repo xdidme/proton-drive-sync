@@ -16,7 +16,8 @@ export async function resetCommand(options: {
   if (!yes) {
     let message: string;
     if (retriesOnly) {
-      message = 'This will remove all sync jobs that are pending retry. Continue?';
+      message =
+        'This will clear the retry delay for all pending retry jobs so they get picked up immediately. Continue?';
     } else if (signalsOnly) {
       message = 'This will clear all signals from the database. Continue?';
     } else {
@@ -36,8 +37,12 @@ export async function resetCommand(options: {
   }
 
   if (retriesOnly) {
-    const result = db.delete(schema.syncJobs).where(gt(schema.syncJobs.nRetries, 0)).run();
-    console.log(`Removed ${result.changes} job(s) pending retry.`);
+    const result = db
+      .update(schema.syncJobs)
+      .set({ retryAt: new Date() })
+      .where(gt(schema.syncJobs.nRetries, 0))
+      .run();
+    console.log(`Cleared retry delay for ${result.changes} job(s).`);
   } else if (signalsOnly) {
     db.delete(schema.signals).run();
     console.log('Signals cleared.');

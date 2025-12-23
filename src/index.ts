@@ -6,7 +6,9 @@ import { program } from 'commander';
 import { authCommand } from './cli/auth.js';
 import { configCommand } from './cli/config.js';
 import { logsCommand, logsClearCommand } from './cli/logs.js';
+import { pauseCommand } from './cli/pause.js';
 import { resetCommand } from './cli/reset.js';
+import { resumeCommand } from './cli/resume.js';
 import {
   serviceInstallCommand,
   serviceUninstallCommand,
@@ -58,6 +60,16 @@ program
   .command('stop')
   .description('Stop any running proton-drive-sync process')
   .action(stopCommand);
+
+program
+  .command('pause')
+  .description('Pause syncing without stopping the process')
+  .action(pauseCommand);
+
+program
+  .command('resume')
+  .description('Resume syncing after it has been paused')
+  .action(resumeCommand);
 
 const logsCmd = program.command('logs').description('View service logs');
 

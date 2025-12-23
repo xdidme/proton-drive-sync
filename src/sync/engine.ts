@@ -7,7 +7,7 @@
 import { join, basename } from 'path';
 import { SyncEventType } from '../db/schema.js';
 import { logger } from '../logger.js';
-import { registerSignalHandler } from '../signals.js';
+import { registerSignalHandler, sendSignal, consumeSignal } from '../signals.js';
 import { stopDashboard } from '../dashboard/server.js';
 import type { Config } from '../config.js';
 import type { ProtonDriveClient } from '../proton/types.js';
@@ -158,6 +158,7 @@ export async function runWatchMode(options: SyncOptions): Promise<void> {
 
 interface ProcessorHandle {
   stop: () => void;
+  isPaused: () => boolean;
 }
 
 /**
@@ -169,10 +170,35 @@ function startJobProcessorLoop(
   dryRun: boolean
 ): ProcessorHandle {
   let running = true;
+  let paused = false;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  // Register pause/resume signal handlers
+  const handlePause = (): void => {
+    paused = true;
+    sendSignal('paused');
+    logger.info('Sync paused');
+  };
+
+  const handleResume = (): void => {
+    paused = false;
+    consumeSignal('paused');
+    logger.info('Sync resumed');
+  };
+
+  registerSignalHandler('pause-sync', handlePause);
+  registerSignalHandler('resume-sync', handleResume);
 
   const processLoop = async (): Promise<void> => {
     if (!running) return;
+
+    if (paused) {
+      // When paused, just reschedule without processing
+      if (running) {
+        timeoutId = setTimeout(processLoop, JOB_POLL_INTERVAL_MS);
+      }
+      return;
+    }
 
     const startTime = Date.now();
     logger.debug('Job processor polling...');
@@ -203,6 +229,9 @@ function startJobProcessorLoop(
         clearTimeout(timeoutId);
         timeoutId = null;
       }
+      // Clean up paused signal if we're stopping while paused
+      consumeSignal('paused');
     },
+    isPaused: () => paused,
   };
 }

@@ -175,7 +175,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
   // Start dashboard early (before auth) so user can see auth status
   const dryRun = options.dryRun ?? false;
   if (options.watch) {
-    startDashboard(dryRun);
+    startDashboard(config, dryRun);
   }
 
   // Authenticate with Proton

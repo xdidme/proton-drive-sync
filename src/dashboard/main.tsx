@@ -19,6 +19,7 @@ import { xdgState } from 'xdg-basedir';
 import { EventEmitter } from 'events';
 import { getJobCounts, getRecentJobs, getBlockedJobs, getProcessingJobs } from '../sync/queue.js';
 import type { DashboardDiff, AuthStatusUpdate, DashboardJob } from './server.js';
+import type { Config } from '../config.js';
 
 // ============================================================================
 // Constants
@@ -47,15 +48,24 @@ const authEvents = new EventEmitter();
 
 // Current auth status (for API endpoint)
 let currentAuthStatus: AuthStatusUpdate = { status: 'pending' };
+let currentConfig: Config | null = null;
 
 // Listen for diff events from parent process via IPC
 process.on(
   'message',
-  (msg: { type: string; diff?: DashboardDiff; dryRun?: boolean } & Partial<AuthStatusUpdate>) => {
+  (
+    msg: {
+      type: string;
+      diff?: DashboardDiff;
+      dryRun?: boolean;
+      config?: Config;
+    } & Partial<AuthStatusUpdate>
+  ) => {
     if (msg.type === 'job_state_diff' && msg.diff) {
       stateDiffEvents.emit('job_state_diff', msg.diff);
-    } else if (msg.type === 'config' && msg.dryRun !== undefined) {
-      isDryRun = msg.dryRun;
+    } else if (msg.type === 'config') {
+      if (msg.dryRun !== undefined) isDryRun = msg.dryRun;
+      if (msg.config) currentConfig = msg.config;
     } else if (msg.type === 'auth') {
       currentAuthStatus = {
         status: msg.status!,
@@ -312,6 +322,41 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#039;');
 }
 
+/** Render config info HTML */
+function renderConfigInfo(config: Config | null): string {
+  if (!config) return '';
+
+  return `
+  <div class="flex flex-wrap gap-3 max-h-24 overflow-y-auto custom-scrollbar p-1">
+  ${config.sync_dirs
+    .map((dir) => {
+      const folderName = basename(dir.source_path);
+      const remotePath = dir.remote_root ? `${dir.remote_root}/${folderName}` : folderName;
+      return `
+    <div class="flex items-center gap-2 px-3 py-1.5 bg-gray-900 border border-gray-700 rounded-md shadow-sm group hover:border-gray-600 transition-colors">
+      <div class="flex items-center gap-2">
+        <svg class="w-3.5 h-3.5 text-gray-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+        </svg>
+        <span class="font-mono text-xs text-gray-300">${escapeHtml(dir.source_path)}</span>
+      </div>
+      
+      <svg class="w-3 h-3 text-gray-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+      </svg>
+
+      <div class="flex items-center gap-2">
+        <svg class="w-3.5 h-3.5 text-indigo-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+        </svg>
+        <span class="font-mono text-xs text-indigo-300">/${escapeHtml(remotePath)}</span>
+      </div>
+    </div>`;
+    })
+    .join('')}
+  </div>`;
+}
+
 // ============================================================================
 // Hono App
 // ============================================================================
@@ -379,6 +424,10 @@ app.get('/api/fragments/auth-status', (c) => {
 
 app.get('/api/fragments/dry-run-banner', (c) => {
   return c.html(renderDryRunBanner(isDryRun));
+});
+
+app.get('/api/fragments/config-info', (c) => {
+  return c.html(renderConfigInfo(currentConfig));
 });
 
 // ============================================================================

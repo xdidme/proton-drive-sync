@@ -8,8 +8,10 @@
 import { fork, type ChildProcess } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { watch } from 'fs';
 import { jobEvents, type JobEvent } from '../sync/queue.js';
 import { logger } from '../logger.js';
+import type { Config } from '../config.js';
 
 // ============================================================================
 // Constants
@@ -152,28 +154,48 @@ let dashboardProcess: ChildProcess | null = null;
 let jobEventHandler: ((event: JobEvent) => void) | null = null;
 let accumulatedDiff: DashboardDiff = createEmptyDiff();
 let diffTimeout: ReturnType<typeof setTimeout> | null = null;
+let fileWatcher: ReturnType<typeof watch> | null = null;
+let currentConfig: Config | null = null;
+let currentDryRun = false;
 
 /**
  * Start the dashboard in a separate process.
  */
-export function startDashboard(dryRun = false): void {
+export function startDashboard(config: Config, dryRun = false): void {
   if (dashboardProcess) {
     logger.warn('Dashboard process already running');
     return;
   }
 
+  // Store config for potential restarts
+  currentConfig = config;
+  currentDryRun = dryRun;
+
   logger.debug(`Dashboard starting with dryRun=${dryRun}`);
 
+  // Determine if we're running in dev mode (set by Makefile)
+  const isDevMode = process.env.PROTON_DEV === '1';
+
   // Fork the dashboard subprocess
-  const mainPath = join(__dirname, 'main.js');
-  dashboardProcess = fork(mainPath, [], {
-    stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
-  });
+  // In dev mode, use tsx to run the TypeScript source directly for hot reload
+  if (isDevMode) {
+    const mainPath = join(__dirname, 'main.tsx');
+    dashboardProcess = fork(mainPath, [], {
+      stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+      execArgv: ['--import', 'tsx'],
+    });
+  } else {
+    const mainPath = join(__dirname, 'main.js');
+    dashboardProcess = fork(mainPath, [], {
+      stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+    });
+  }
 
   // Handle messages from child
   dashboardProcess.on('message', (msg: { type: string; port?: number }) => {
     if (msg.type === 'ready') {
-      logger.info(`Dashboard running at http://localhost:${msg.port}`);
+      const hotReloadMsg = isDevMode ? ' (hot reload enabled)' : '';
+      logger.info(`Dashboard running at http://localhost:${msg.port}${hotReloadMsg}`);
     }
   });
 
@@ -195,7 +217,7 @@ export function startDashboard(dryRun = false): void {
   });
 
   // Send initial config
-  dashboardProcess.send({ type: 'config', dryRun });
+  dashboardProcess.send({ type: 'config', config, dryRun });
 
   // Forward job events to child process via IPC (accumulated into diffs)
   jobEventHandler = (event: JobEvent) => {
@@ -216,12 +238,22 @@ export function startDashboard(dryRun = false): void {
     }
   };
   jobEvents.on('job', jobEventHandler);
+
+  // Watch for source file changes in development
+  if (isDevMode) {
+    setupHotReload();
+  }
 }
 
 /**
  * Stop the dashboard process.
  */
 export function stopDashboard(): void {
+  if (fileWatcher) {
+    fileWatcher.close();
+    fileWatcher = null;
+  }
+
   if (dashboardProcess) {
     // Remove event listener
     if (jobEventHandler) {
@@ -234,6 +266,69 @@ export function stopDashboard(): void {
     dashboardProcess = null;
     logger.debug('Dashboard process stopped');
   }
+}
+
+/**
+ * Set up hot reload for dashboard in development mode.
+ * Watches the dashboard source directory and restarts the subprocess on changes.
+ */
+function setupHotReload(): void {
+  // When running with tsx, __dirname is src/dashboard, otherwise dist/dashboard
+  // We want to watch the source directory for changes
+  const dashboardDir = __dirname.includes('dist')
+    ? __dirname.replace('/dist/', '/src/')
+    : __dirname;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  logger.info(`Dashboard hot reload enabled, watching ${dashboardDir}`);
+
+  fileWatcher = watch(dashboardDir, { recursive: true }, (eventType, filename) => {
+    if (
+      !filename ||
+      (!filename.endsWith('.ts') && !filename.endsWith('.tsx') && !filename.endsWith('.html'))
+    ) {
+      return;
+    }
+
+    // Debounce rapid changes
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      logger.info(`Dashboard source changed (${filename}), restarting...`);
+      restartDashboard();
+    }, 500);
+  });
+}
+
+/**
+ * Restart the dashboard subprocess (used for hot reload).
+ */
+function restartDashboard(): void {
+  if (!currentConfig) return;
+
+  // Stop current process
+  if (dashboardProcess) {
+    if (jobEventHandler) {
+      jobEvents.off('job', jobEventHandler);
+      jobEventHandler = null;
+    }
+    dashboardProcess.kill('SIGTERM');
+    dashboardProcess = null;
+  }
+
+  // Wait a bit for the process to terminate, then restart
+  setTimeout(() => {
+    if (currentConfig) {
+      // Temporarily clear fileWatcher to avoid re-setting up
+      const savedWatcher = fileWatcher;
+      fileWatcher = null;
+      startDashboard(currentConfig, currentDryRun);
+      fileWatcher = savedWatcher;
+    }
+  }, 100);
 }
 
 /**
