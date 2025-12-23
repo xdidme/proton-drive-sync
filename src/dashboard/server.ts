@@ -45,6 +45,7 @@ export interface DashboardJob {
   remotePath?: string | null;
   lastError?: string | null;
   nRetries?: number;
+  retryAt?: Date;
   createdAt?: Date;
 }
 

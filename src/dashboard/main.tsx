@@ -17,7 +17,14 @@ import { join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
 import { xdgState } from 'xdg-basedir';
 import { EventEmitter } from 'events';
-import { getJobCounts, getRecentJobs, getBlockedJobs, getProcessingJobs } from '../sync/queue.js';
+import {
+  getJobCounts,
+  getRecentJobs,
+  getBlockedJobs,
+  getProcessingJobs,
+  getPendingJobs,
+  getRetryJobs,
+} from '../sync/queue.js';
 import type { DashboardDiff, AuthStatusUpdate, DashboardJob } from './server.js';
 import type { Config } from '../config.js';
 
@@ -233,6 +240,72 @@ function renderRecentList(jobs: DashboardJob[]): string {
     .join('')}</div>`;
 }
 
+/** Render pending jobs list HTML */
+function renderPendingList(jobs: DashboardJob[]): string {
+  if (jobs.length === 0) {
+    return `
+<div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
+  <p class="text-sm">Queue empty</p>
+</div>`;
+  }
+
+  return `<div class="space-y-1">${jobs
+    .map(
+      (job) => `
+<div class="px-3 py-2 rounded-lg hover:bg-gray-700/50 transition-colors flex items-center gap-3">
+  <svg class="w-4 h-4 text-amber-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+  </svg>
+  <div class="min-w-0 flex-1">
+    <span class="text-xs font-mono text-gray-300 truncate block">${escapeHtml(formatPath(job.localPath))}</span>
+  </div>
+</div>`
+    )
+    .join('')}</div>`;
+}
+
+/** Format relative time for retry */
+function formatRetryTime(date: Date | string | undefined): string {
+  if (!date) return '';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  const now = new Date();
+  const diffMs = d.getTime() - now.getTime();
+  if (diffMs <= 0) return 'now';
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return `${diffSec}s`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}h`;
+  const diffDay = Math.floor(diffHour / 24);
+  return `${diffDay}d`;
+}
+
+/** Render retry jobs list HTML */
+function renderRetryList(jobs: DashboardJob[]): string {
+  if (jobs.length === 0) {
+    return `
+<div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
+  <p class="text-sm">No scheduled retries</p>
+</div>`;
+  }
+
+  return `<div class="space-y-1">${jobs
+    .map(
+      (job) => `
+<div class="px-3 py-2 rounded-lg hover:bg-gray-700/50 transition-colors flex items-center gap-3">
+  <svg class="w-4 h-4 text-orange-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+  </svg>
+  <div class="min-w-0 flex-1 flex items-center justify-between gap-4">
+    <span class="text-xs font-mono text-gray-300 truncate">${escapeHtml(formatPath(job.localPath))}</span>
+    <span class="text-[10px] text-orange-400 font-mono whitespace-nowrap">in ${formatRetryTime(job.retryAt)}</span>
+  </div>
+</div>`
+    )
+    .join('')}</div>`;
+}
+
 /** Render auth status HTML */
 function renderAuthStatus(auth: AuthStatusUpdate): string {
   const statusConfig = {
@@ -418,6 +491,24 @@ app.get('/api/fragments/recent-count', (c) => {
   return c.html(`${getRecentJobs(50).length} items`);
 });
 
+app.get('/api/fragments/pending', (c) => {
+  const limit = parseInt(c.req.query('limit') || '50', 10);
+  return c.html(renderPendingList(getPendingJobs(limit)));
+});
+
+app.get('/api/fragments/pending-count', (c) => {
+  return c.html(`${getPendingJobs(50).length} items`);
+});
+
+app.get('/api/fragments/retry', (c) => {
+  const limit = parseInt(c.req.query('limit') || '50', 10);
+  return c.html(renderRetryList(getRetryJobs(limit)));
+});
+
+app.get('/api/fragments/retry-count', (c) => {
+  return c.html(`${getRetryJobs(50).length} items`);
+});
+
 app.get('/api/fragments/auth-status', (c) => {
   return c.html(renderAuthStatus(currentAuthStatus));
 });
@@ -474,8 +565,12 @@ app.get('/api/events', async (c) => {
       stream.writeSSE({ event: 'processing-count', data: `${getProcessingJobs().length} items` });
       stream.writeSSE({ event: 'blocked', data: renderBlockedList(getBlockedJobs()) });
       stream.writeSSE({ event: 'blocked-count', data: `${getBlockedJobs().length} items` });
+      stream.writeSSE({ event: 'pending', data: renderPendingList(getPendingJobs(50)) });
+      stream.writeSSE({ event: 'pending-count', data: `${getPendingJobs(50).length} items` });
       stream.writeSSE({ event: 'recent', data: renderRecentList(getRecentJobs(50)) });
       stream.writeSSE({ event: 'recent-count', data: `${getRecentJobs(50).length} items` });
+      stream.writeSSE({ event: 'retry', data: renderRetryList(getRetryJobs(50)) });
+      stream.writeSSE({ event: 'retry-count', data: `${getRetryJobs(50).length} items` });
     };
 
     const authHandler = (auth: AuthStatusUpdate) => {

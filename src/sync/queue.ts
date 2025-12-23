@@ -566,3 +566,51 @@ export function getProcessingJobs() {
     .where(eq(schema.syncJobs.status, SyncJobStatus.PROCESSING))
     .all();
 }
+
+/**
+ * Get pending jobs (ready to process, retryAt <= now).
+ */
+export function getPendingJobs(limit: number = 50) {
+  const now = new Date();
+  return db
+    .select({
+      id: schema.syncJobs.id,
+      localPath: schema.syncJobs.localPath,
+      remotePath: schema.syncJobs.remotePath,
+      createdAt: schema.syncJobs.createdAt,
+    })
+    .from(schema.syncJobs)
+    .where(
+      and(eq(schema.syncJobs.status, SyncJobStatus.PENDING), lte(schema.syncJobs.retryAt, now))
+    )
+    .orderBy(schema.syncJobs.retryAt)
+    .limit(limit)
+    .all();
+}
+
+/**
+ * Get jobs scheduled for retry (retryAt > now).
+ */
+export function getRetryJobs(limit: number = 50) {
+  const now = new Date().toISOString();
+  return db
+    .select({
+      id: schema.syncJobs.id,
+      localPath: schema.syncJobs.localPath,
+      remotePath: schema.syncJobs.remotePath,
+      retryAt: schema.syncJobs.retryAt,
+      nRetries: schema.syncJobs.nRetries,
+      lastError: schema.syncJobs.lastError,
+      createdAt: schema.syncJobs.createdAt,
+    })
+    .from(schema.syncJobs)
+    .where(
+      and(
+        eq(schema.syncJobs.status, SyncJobStatus.PENDING),
+        sql`${schema.syncJobs.retryAt} > ${now}`
+      )
+    )
+    .orderBy(schema.syncJobs.retryAt)
+    .limit(limit)
+    .all();
+}
