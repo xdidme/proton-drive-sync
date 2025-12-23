@@ -8,9 +8,9 @@ install:
 build:
 	pnpm build
 
-# Run directly with tsx (no build required)
+# Run directly with tsx in watch mode (auto-reload on file changes)
 dev:
-	PROTON_DEV=1 pnpm tsx src/index.ts $(ARGS)
+	PROTON_DEV=1 pnpm tsx watch src/index.ts $(ARGS)
 
 # Run pre-commit checks on all files
 pre-commit:
