@@ -78,7 +78,10 @@ export async function createClientFromLogin(
     telemetry,
   });
 
-  return { client: client as unknown as ProtonDriveClient, credentials };
+  return {
+    client: client as unknown as ProtonDriveClient,
+    credentials: { ...credentials, username },
+  };
 }
 
 /**
@@ -143,7 +146,7 @@ export async function authCommand(): Promise<void> {
   try {
     const { credentials } = await createClientFromLogin(username, pwd);
 
-    // Save tokens to keychain
+    // Save tokens and username to keychain
     await deleteStoredCredentials();
     await storeCredentials(credentials);
     console.log('Credentials saved to Keychain.');

@@ -72,7 +72,7 @@ function parseConfig(exitOnError: boolean): Config | null {
     if (exitOnError) {
       console.error(msg);
       console.error(
-        'Create it with: {"sync_dirs": [{"source_path": "/path/to/dir", "remote_root": "backup"}]}'
+        'Create it with: {"sync_dirs": [{"source_path": "/path/to/dir", "remote_root": "/backup"}]}'
       );
       process.exit(1);
     }
@@ -117,7 +117,7 @@ function parseConfig(exitOnError: boolean): Config | null {
         if (exitOnError) {
           console.error(msg);
           console.error(
-            'Example: {"sync_dirs": [{"source_path": "/path/to/dir", "remote_root": "backup"}]}'
+            'Example: {"sync_dirs": [{"source_path": "/path/to/dir", "remote_root": "/backup"}]}'
           );
           process.exit(1);
         }
@@ -149,10 +149,6 @@ function parseConfig(exitOnError: boolean): Config | null {
         }
         logger.error(msg);
         return null;
-      }
-      // Default remote_root to empty string if not set
-      if (dir.remote_root === undefined) {
-        dir.remote_root = '';
       }
     }
 

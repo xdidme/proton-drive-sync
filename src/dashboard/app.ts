@@ -349,7 +349,7 @@ function renderAuthStatus(auth: AuthStatusUpdate): string {
       border: 'border-green-500/30 bg-green-500/10',
       icon: `<svg class="h-3 w-3 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" /></svg>`,
       text: 'text-green-400',
-      label: `Authenticated as: ${escapeHtml(auth.username || 'User')}`,
+      label: '', // Set below after status check
     },
     failed: {
       border: 'border-red-500/30 bg-red-500/10',
@@ -359,9 +359,17 @@ function renderAuthStatus(auth: AuthStatusUpdate): string {
     },
   };
 
+  // Set authenticated label only when status is authenticated (to safely access username)
+  if (auth.status === 'authenticated') {
+    const label = auth.username
+      ? `Authenticated as: ${escapeHtml(auth.username)}`
+      : 'Authenticated';
+    statusConfig.authenticated.label = label;
+  }
+
   const config = statusConfig[auth.status];
   return `
-<div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-900 border border-gray-700 transition-colors duration-300 ${config.border}">
+<div class="h-9 flex items-center gap-2 px-3 rounded-full bg-gray-900 border border-gray-700 transition-colors duration-300 ${config.border}">
   ${config.icon}
   <span class="text-xs font-medium ${config.text}">${config.label}</span>
 </div>`;
@@ -484,7 +492,8 @@ function renderConfigInfo(config: Config | null): string {
   ${config.sync_dirs
     .map((dir) => {
       const folderName = basename(dir.source_path);
-      const remotePath = dir.remote_root ? `${dir.remote_root}/${folderName}` : folderName;
+      const remotePath =
+        dir.remote_root === '/' ? `/${folderName}` : `${dir.remote_root}/${folderName}`;
       return `
     <div class="flex items-center gap-2 px-3 py-1.5 bg-gray-900 border border-gray-700 rounded-md shadow-sm group hover:border-gray-600 transition-colors">
       <div class="flex items-center gap-2">
@@ -502,7 +511,7 @@ function renderConfigInfo(config: Config | null): string {
         <svg class="w-3.5 h-3.5 text-indigo-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
         </svg>
-        <span class="font-mono text-xs text-indigo-300">/${escapeHtml(remotePath)}</span>
+        <span class="font-mono text-xs text-indigo-300">${escapeHtml(remotePath)}</span>
       </div>
     </div>`;
     })
@@ -517,15 +526,311 @@ function renderConfigInfo(config: Config | null): string {
 const app = new Hono();
 let isDryRun = false;
 
+// Page-specific scripts
+const HOME_PAGE_SCRIPTS = `
+<script>
+  // Log level filtering
+  let currentLogLevel = 20;
+  
+  function setLogLevel(level) {
+    currentLogLevel = level;
+    // Update button styles
+    [20, 30, 40, 50].forEach(l => {
+      const btn = document.getElementById('log-level-' + l);
+      if (btn) {
+        if (l === level) {
+          btn.className = 'px-2 py-0.5 text-[10px] font-medium rounded transition-all duration-200 bg-gray-700 text-gray-200 shadow-sm';
+        } else {
+          btn.className = 'px-2 py-0.5 text-[10px] font-medium rounded transition-all duration-200 text-gray-500 hover:text-gray-400 hover:bg-gray-800/50';
+        }
+      }
+    });
+    // Filter log lines
+    document.querySelectorAll('#logs-container > div[data-level]').forEach(el => {
+      const logLevel = parseInt(el.getAttribute('data-level') || '0');
+      el.style.display = logLevel >= level ? '' : 'none';
+    });
+  }
+
+  // Apply filter to new log lines as they arrive
+  const logsContainer = document.getElementById('logs-container');
+  if (logsContainer) {
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeType === 1 && node.hasAttribute('data-level')) {
+            const logLevel = parseInt(node.getAttribute('data-level') || '0');
+            node.style.display = logLevel >= currentLogLevel ? '' : 'none';
+          }
+        });
+      });
+    });
+    observer.observe(logsContainer, { childList: true });
+  }
+
+  // Retry countdown timer
+  function updateRetryCountdowns() {
+    document.querySelectorAll('.retry-countdown').forEach(el => {
+      const retryAt = el.getAttribute('data-retry-at');
+      if (!retryAt) return;
+      const retryTime = new Date(retryAt).getTime();
+      const now = Date.now();
+      const diffMs = retryTime - now;
+      if (diffMs <= 0) {
+        el.textContent = 'now';
+      } else {
+        const secs = Math.ceil(diffMs / 1000);
+        if (secs >= 60) {
+          const mins = Math.floor(secs / 60);
+          el.textContent = 'in ' + mins + 'm ' + (secs % 60) + 's';
+        } else {
+          el.textContent = 'in ' + secs + 's';
+        }
+      }
+    });
+  }
+  setInterval(updateRetryCountdowns, 1000);
+  updateRetryCountdowns();
+
+  // Re-initialize Lucide icons after SSE updates
+  document.body.addEventListener('htmx:afterSwap', () => {
+    lucide.createIcons();
+    updateRetryCountdowns();
+  });
+</script>`;
+
+const SETTINGS_PAGE_SCRIPTS = `
+<script>
+  let syncDirs = [];
+  let originalConfig = null;
+
+  // Load current config on page load
+  async function loadConfig() {
+    try {
+      const response = await fetch('/api/config');
+      const data = await response.json();
+      const config = data.config;
+      originalConfig = JSON.parse(JSON.stringify(config));
+
+      document.getElementById('sync-concurrency').value = config.sync_concurrency || 8;
+      document.getElementById('concurrency-value').textContent = config.sync_concurrency || 8;
+      syncDirs = config.sync_dirs || [];
+      renderSyncDirs();
+    } catch (err) {
+      console.error('Failed to load config:', err);
+    }
+  }
+
+  function renderSyncDirs() {
+    const container = document.getElementById('sync-dirs-list');
+    const noMessage = document.getElementById('no-dirs-message');
+
+    if (syncDirs.length === 0) {
+      container.innerHTML = '';
+      noMessage.classList.remove('hidden');
+      return;
+    }
+
+    noMessage.classList.add('hidden');
+    container.innerHTML = syncDirs
+      .map(
+        (dir, index) => \`
+      <div class="flex items-center gap-3 p-4 bg-gray-900 border border-gray-700 rounded-lg group">
+        <div class="flex-1 grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Local Path</label>
+            <input
+              type="text"
+              value="\${escapeHtml(dir.source_path)}"
+              onchange="updateSyncDir(\${index}, 'source_path', this.value)"
+              placeholder="/path/to/local/directory"
+              class="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-proton"
+            />
+          </div>
+          <div>
+            <div class="flex items-center gap-1 mb-1">
+              <label class="block text-xs text-gray-500">Remote Root</label>
+              <div class="relative group">
+                <i data-lucide="info" class="w-3 h-3 text-gray-500 cursor-help"></i>
+                <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-xs text-gray-300 w-96 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+                  The destination folder in Proton Drive. Must start with / indicating the base of the Proton Drive filesystem.
+                </div>
+              </div>
+            </div>
+            <input
+              type="text"
+              value="\${escapeHtml(dir.remote_root || '/')}"
+              onchange="updateSyncDir(\${index}, 'remote_root', this.value)"
+              placeholder="/"
+              class="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-proton"
+            />
+          </div>
+        </div>
+        <button
+          onclick="removeSyncDir(\${index})"
+          class="p-2 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+          title="Remove directory"
+        >
+          <i data-lucide="trash-2" class="w-5 h-5"></i>
+        </button>
+      </div>
+    \`
+      )
+      .join('');
+
+    // Re-initialize Lucide icons for dynamically added content
+    lucide.createIcons();
+  }
+
+  function addSyncDir() {
+    syncDirs.push({ source_path: '', remote_root: '/' });
+    renderSyncDirs();
+  }
+
+  function removeSyncDir(index) {
+    syncDirs.splice(index, 1);
+    renderSyncDirs();
+  }
+
+  function updateSyncDir(index, field, value) {
+    if (field === 'remote_root') {
+      const input = event.target;
+      if (value && !value.startsWith('/')) {
+        input.classList.add('border-red-500');
+        input.setCustomValidity('Remote root must start with /');
+        return;
+      } else {
+        input.classList.remove('border-red-500');
+        input.setCustomValidity('');
+      }
+    }
+    syncDirs[index][field] = value;
+  }
+
+  async function saveConfig() {
+    const saveButton = document.getElementById('save-button');
+    const saveStatus = document.getElementById('save-status');
+
+    // Validate
+    const validDirs = syncDirs.filter((d) => d.source_path.trim());
+    if (validDirs.length === 0) {
+      saveStatus.textContent = 'At least one directory is required';
+      saveStatus.className = 'text-sm text-red-400';
+      return;
+    }
+
+    const config = {
+      sync_concurrency: parseInt(document.getElementById('sync-concurrency').value) || 8,
+      sync_dirs: validDirs.map((d) => ({
+        source_path: d.source_path.trim(),
+        remote_root: d.remote_root?.trim() || '',
+      })),
+    };
+
+    saveButton.disabled = true;
+    saveStatus.textContent = 'Saving...';
+    saveStatus.className = 'text-sm text-gray-400';
+
+    try {
+      const response = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        saveStatus.textContent = 'Saved successfully!';
+        saveStatus.className = 'text-sm text-green-400';
+        originalConfig = JSON.parse(JSON.stringify(config));
+        syncDirs = config.sync_dirs;
+        renderSyncDirs();
+      } else {
+        saveStatus.textContent = result.error || 'Failed to save';
+        saveStatus.className = 'text-sm text-red-400';
+      }
+    } catch (err) {
+      saveStatus.textContent = 'Error saving config';
+      saveStatus.className = 'text-sm text-red-400';
+    } finally {
+      saveButton.disabled = false;
+      setTimeout(() => {
+        saveStatus.textContent = '';
+      }, 3000);
+    }
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  // Load config on page load
+  loadConfig();
+</script>`;
+
+/**
+ * Compose a page by injecting content into the layout template
+ */
+async function composePage(
+  layoutHtml: string,
+  contentHtml: string,
+  options: {
+    title: string;
+    activeTab: 'home' | 'settings';
+    pageScripts: string;
+  }
+): Promise<string> {
+  const homeTabClass =
+    options.activeTab === 'home'
+      ? 'bg-gray-700 text-white'
+      : 'text-gray-400 hover:text-white hover:bg-gray-700/50';
+  const settingsTabClass =
+    options.activeTab === 'settings'
+      ? 'bg-gray-700 text-white'
+      : 'text-gray-400 hover:text-white hover:bg-gray-700/50';
+
+  return layoutHtml
+    .replace('{{TITLE}}', options.title)
+    .replace('{{HOME_TAB_CLASS}}', homeTabClass)
+    .replace('{{SETTINGS_TAB_CLASS}}', settingsTabClass)
+    .replace('{{CONTENT}}', contentHtml)
+    .replace('{{PAGE_SCRIPTS}}', options.pageScripts);
+}
+
+// Cache layout template
+let layoutHtml: string | null = null;
+
+async function getLayout(): Promise<string> {
+  if (!layoutHtml) {
+    layoutHtml = await readFile(join(__dirname, 'layout.html'), 'utf-8');
+  }
+  return layoutHtml;
+}
+
 // Serve dashboard HTML at root
 app.get('/', async (c) => {
-  const html = await readFile(join(__dirname, 'home.html'), 'utf-8');
+  const layout = await getLayout();
+  const content = await readFile(join(__dirname, 'home.html'), 'utf-8');
+  const html = await composePage(layout, content, {
+    title: 'Proton Drive Sync',
+    activeTab: 'home',
+    pageScripts: HOME_PAGE_SCRIPTS,
+  });
   return c.html(html);
 });
 
-// Serve config page
-app.get('/config', async (c) => {
-  const html = await readFile(join(__dirname, 'config.html'), 'utf-8');
+// Serve settings page
+app.get('/settings', async (c) => {
+  const layout = await getLayout();
+  const content = await readFile(join(__dirname, 'config.html'), 'utf-8');
+  const html = await composePage(layout, content, {
+    title: 'Settings - Proton Drive Sync',
+    activeTab: 'settings',
+    pageScripts: SETTINGS_PAGE_SCRIPTS,
+  });
   return c.html(html);
 });
 

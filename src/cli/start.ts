@@ -51,7 +51,7 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
 
     try {
       const client = await createClientFromTokens(storedCreds, sdkDebug);
-      sendAuthStatus({ status: 'authenticated' });
+      sendAuthStatus({ status: 'authenticated', username: storedCreds.username });
       logger.info('Authenticated.');
       return client;
     } catch (error) {

@@ -9,6 +9,7 @@
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
     <script src="https://unpkg.com/idiomorph@0.3.0/dist/idiomorph-ext.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
     <style>
       .custom-scrollbar::-webkit-scrollbar {
         width: 8px;
@@ -23,6 +24,46 @@
       }
       .custom-scrollbar::-webkit-scrollbar-thumb:hover {
         background: #6b7280;
+      }
+      /* Hide tab labels when viewport is too narrow */
+      .tab-label {
+        display: none;
+      }
+      @media (min-width: 1050px) {
+        .tab-label {
+          display: inline;
+        }
+      }
+      /* Hide GitHub text before title */
+      .github-text {
+        display: none;
+      }
+      @media (min-width: 900px) {
+        .github-text {
+          display: inline;
+        }
+      }
+      /* Hide title when narrower */
+      .header-title {
+        display: none;
+      }
+      @media (min-width: 850px) {
+        .header-title {
+          display: block;
+        }
+      }
+      /* Hide auth badge when very narrow */
+      .auth-badge {
+        display: none;
+      }
+      @media (min-width: 700px) {
+        .auth-badge {
+          display: block;
+        }
+      }
+      /* GitHub badge star hover effect */
+      .github-badge:hover [data-lucide='star'] {
+        color: #facc15; /* yellow-400 */
       }
     </style>
     <script>
@@ -52,51 +93,186 @@
       };
     </script>
   </head>
-  <body class="h-full flex flex-col" {{BODY_ATTRS}}>
-    {{BANNER}}
+  <body class="h-full flex flex-col" hx-ext="sse,morph" sse-connect="/api/events">
+    <!-- Dry-Run Warning Banner -->
+    <div
+      id="dry-run-banner"
+      hx-get="/api/fragments/dry-run-banner"
+      hx-trigger="load"
+      hx-swap="outerHTML"
+    ></div>
+
+    <!-- Hidden heartbeat listener to trigger pulse animation -->
+    <div
+      id="heartbeat-listener"
+      class="hidden"
+      sse-swap="heartbeat"
+      hx-on::after-swap="document.body.dispatchEvent(new CustomEvent('heartbeat-received'))"
+    ></div>
 
     <!-- Header -->
     <header class="bg-gray-800 border-b border-gray-700 shadow-sm sticky top-0 z-50">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        <div class="flex items-center gap-6">
-          <a href="/" class="flex items-center gap-3">
+      <div
+        class="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-2 sm:gap-4"
+      >
+        <div class="flex items-center gap-2 sm:gap-6 min-w-0">
+          <a href="/" class="flex items-center gap-2 sm:gap-3 shrink-0">
             <img
               src="/assets/icon.svg"
               alt="Proton Drive Sync"
-              class="w-8 h-8 rounded-lg shadow-lg shadow-proton/20"
+              class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg shadow-lg shadow-proton/20"
             />
-            <h1 class="text-xl font-bold tracking-tight text-white">Proton Drive Sync</h1>
+            <!-- Title: second to collapse (below 700px) -->
+            <h1
+              class="header-title text-lg lg:text-xl font-bold tracking-tight text-white whitespace-nowrap"
+            >
+              Proton Drive Sync
+            </h1>
           </a>
 
           <!-- Tab Navigation -->
-          <nav class="flex items-center gap-1 ml-4">
+          <nav class="flex items-center gap-1">
             <a
               href="/"
-              class="px-4 py-2 text-sm font-medium rounded-lg transition-colors {{HOME_TAB_CLASS}}"
+              class="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium rounded-lg transition-colors whitespace-nowrap {{HOME_TAB_CLASS}}"
             >
-              Home
+              <i data-lucide="house" class="w-4 h-4 shrink-0"></i>
+              <!-- Tab labels: first to collapse (below 850px) -->
+              <span class="tab-label">Home</span>
             </a>
             <a
-              href="/config"
-              class="px-4 py-2 text-sm font-medium rounded-lg transition-colors {{CONFIG_TAB_CLASS}}"
+              href="/settings"
+              class="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium rounded-lg transition-colors whitespace-nowrap {{SETTINGS_TAB_CLASS}}"
             >
-              Config
+              <i data-lucide="settings" class="w-4 h-4 shrink-0"></i>
+              <!-- Tab labels: first to collapse (below 850px) -->
+              <span class="tab-label">Settings</span>
             </a>
           </nav>
         </div>
 
-        {{HEADER_RIGHT}}
+        <div class="flex items-center gap-2 sm:gap-4 shrink-0">
+          <!-- GitHub Stars Badge -->
+          <a
+            href="https://github.com/DamianB-BitFlipper/proton-drive-sync"
+            target="_blank"
+            class="github-badge h-9 flex items-center gap-2 px-3 bg-gray-900 border border-gray-600 rounded-full hover:border-gray-500 transition-colors"
+          >
+            <img src="/assets/github.svg" alt="GitHub" class="w-4 h-4" />
+            <span class="github-text text-gray-300 text-sm font-medium">GitHub</span>
+            <i data-lucide="star" class="w-4 h-4 text-white transition-colors fill-current"></i>
+            <img
+              src="https://img.shields.io/github/stars/DamianB-BitFlipper/proton-drive-sync?style=flat&label=&color=1f2937"
+              alt="Stars"
+              class="h-5"
+            />
+          </a>
+
+          <!-- Buy Me a Coffee: always visible -->
+          <a href="https://www.buymeacoffee.com/thebitflipper" target="_blank">
+            <img
+              src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png"
+              alt="Buy Me A Coffee"
+              class="h-9 w-auto"
+            />
+          </a>
+
+          <!-- Auth Status: third to collapse (below 550px) -->
+          <div
+            id="auth-status"
+            class="auth-badge"
+            hx-get="/api/fragments/auth-status"
+            hx-trigger="load"
+            hx-swap="morph:innerHTML"
+            sse-swap="auth"
+          ></div>
+
+          <!-- Connection Status: always visible -->
+          <div
+            id="connection-status"
+            class="h-9 flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 rounded-full bg-gray-900 border border-green-500/30 bg-green-500/10"
+          >
+            <div class="relative flex h-2.5 w-2.5">
+              <span
+                id="heartbeat-ping"
+                class="absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-0"
+              ></span>
+              <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+            </div>
+            <span class="text-xs font-medium text-green-400">Connected</span>
+          </div>
+        </div>
       </div>
     </header>
 
     <main class="flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-6 lg:p-8">{{CONTENT}}</main>
 
     <script>
-      {
-        {
-          SCRIPTS;
-        }
+      // Handle SSE connection status
+      let heartbeatTimeout = null;
+      const HEARTBEAT_TIMEOUT_MS = 10000;
+
+      function showDisconnected() {
+        document.getElementById('connection-status').innerHTML = `
+          <div class="relative flex h-2.5 w-2.5">
+            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+          </div>
+          <span class="text-xs font-medium text-red-400">Disconnected</span>
+        `;
+        document.getElementById('connection-status').className =
+          'h-9 flex items-center gap-2 px-3 rounded-full bg-gray-900 border border-red-500/30 bg-red-500/10';
+
+        // Stop activity indicators
+        document.querySelectorAll('.animate-pulse').forEach((el) => {
+          el.classList.remove('animate-pulse');
+          el.classList.add('opacity-50');
+        });
+        document.querySelectorAll('.animate-spin').forEach((el) => {
+          el.classList.remove('animate-spin');
+          el.classList.add('opacity-50');
+        });
       }
+
+      function resetHeartbeatTimeout() {
+        if (heartbeatTimeout) clearTimeout(heartbeatTimeout);
+        heartbeatTimeout = setTimeout(showDisconnected, HEARTBEAT_TIMEOUT_MS);
+      }
+
+      document.body.addEventListener('htmx:sseOpen', () => {
+        document.getElementById('connection-status').innerHTML = `
+          <div class="relative flex h-2.5 w-2.5">
+            <span id="heartbeat-ping" class="absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-0"></span>
+            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+          </div>
+          <span class="text-xs font-medium text-green-400">Connected</span>
+        `;
+        document.getElementById('connection-status').className =
+          'h-9 flex items-center gap-2 px-3 rounded-full bg-gray-900 border border-green-500/30 bg-green-500/10';
+        resetHeartbeatTimeout();
+      });
+
+      // Pulse the heartbeat dot on each heartbeat event
+      document.body.addEventListener('heartbeat-received', () => {
+        resetHeartbeatTimeout();
+        const ping = document.getElementById('heartbeat-ping');
+        if (ping) {
+          ping.classList.remove('opacity-0');
+          ping.classList.add('animate-ping', 'opacity-75');
+          setTimeout(() => {
+            ping.classList.remove('animate-ping', 'opacity-75');
+            ping.classList.add('opacity-0');
+          }, 500);
+        }
+      });
+
+      document.body.addEventListener('htmx:sseError', () => {
+        if (heartbeatTimeout) clearTimeout(heartbeatTimeout);
+        showDisconnected();
+      });
+
+      // Initialize Lucide icons
+      lucide.createIcons();
     </script>
+    {{PAGE_SCRIPTS}}
   </body>
 </html>

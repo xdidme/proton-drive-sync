@@ -19,6 +19,7 @@ export interface StoredCredentials {
   AccessToken: string;
   RefreshToken: string;
   SaltedKeyPass?: string;
+  username: string;
 }
 
 export async function getStoredCredentials(): Promise<StoredCredentials | null> {

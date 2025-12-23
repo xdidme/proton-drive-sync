@@ -45,19 +45,19 @@ This opens the config file at `~/.config/proton-drive-sync/config.json`:
   "sync_dirs": [
     {
       "source_path": "/path/to/directory",
-      "remote_root": "backups"
+      "remote_root": "/backups"
     }
   ]
 }
 ```
 
-| Field                     | Required | Description                                        |
-| ------------------------- | -------- | -------------------------------------------------- |
-| `sync_dirs`               | Yes      | Array of sync directory configurations             |
-| `sync_dirs[].source_path` | Yes      | Local directory path to sync                       |
-| `sync_dirs[].remote_root` | No       | Remote folder prefix in Proton Drive (default: "") |
+| Field                     | Required | Description                                         |
+| ------------------------- | -------- | --------------------------------------------------- |
+| `sync_dirs`               | Yes      | Array of sync directory configurations              |
+| `sync_dirs[].source_path` | Yes      | Local directory path to sync                        |
+| `sync_dirs[].remote_root` | No       | Remote folder prefix in Proton Drive (default: "/") |
 
-Each directory in `sync_dirs` will be watched and synced to Proton Drive. Files are uploaded to a folder named after the directory basename (e.g., `source_path: "/Users/me/Documents"` syncs to `Documents/` in Proton Drive, or `backups/Documents/` if `remote_root` is set).
+Each directory in `sync_dirs` will be watched and synced to Proton Drive. Files are uploaded to a folder named after the directory basename (e.g., `source_path: "/Users/me/Documents"` syncs to `/Documents` in Proton Drive, or `/backups/Documents` if `remote_root` is set to `/backups`).
 
 ## Other CLI Usage
 

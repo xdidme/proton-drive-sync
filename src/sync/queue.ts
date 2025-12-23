@@ -414,6 +414,7 @@ export function categorizeError(error: string): ErrorClassification {
     'network',
     'timeout',
     'connection',
+    'fetch failed',
   ];
   if (networkPatterns.some((pattern) => lowerError.includes(pattern.toLowerCase()))) {
     return {

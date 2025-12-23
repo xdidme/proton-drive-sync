@@ -193,14 +193,14 @@ export function startDashboard(config: Config, dryRun = false): void {
   // Fork the dashboard subprocess
   // In dev mode, use tsx to run the TypeScript source directly for hot reload
   if (isDevMode) {
-    const mainPath = join(__dirname, 'main.tsx');
-    dashboardProcess = fork(mainPath, [], {
+    const appPath = join(__dirname, 'app.ts');
+    dashboardProcess = fork(appPath, [], {
       stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
       execArgv: ['--import', 'tsx'],
     });
   } else {
-    const mainPath = join(__dirname, 'main.js');
-    dashboardProcess = fork(mainPath, [], {
+    const appPath = join(__dirname, 'app.js');
+    dashboardProcess = fork(appPath, [], {
       stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
     });
   }
@@ -394,13 +394,17 @@ function sendStatusToDashboard(force = false): void {
     isPaused: isPaused(),
   };
 
+  // Helper to safely get username from auth status
+  const getUsername = (auth: AuthStatusUpdate) =>
+    auth.status === 'authenticated' ? auth.username : undefined;
+
   // Check if status has changed
   const hasChanged =
     force ||
     !lastSentStatus ||
     lastSentStatus.isPaused !== status.isPaused ||
     lastSentStatus.auth.status !== status.auth.status ||
-    lastSentStatus.auth.username !== status.auth.username;
+    getUsername(lastSentStatus.auth) !== getUsername(status.auth);
 
   if (hasChanged) {
     dashboardProcess.send({ type: 'status', ...status });
