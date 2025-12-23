@@ -603,6 +603,7 @@ const SETTINGS_PAGE_SCRIPTS = `
 <script>
   let syncDirs = [];
   let originalConfig = null;
+  const redirectAfterSave = '{{REDIRECT_AFTER_SAVE}}';
 
   // Load current config on page load
   async function loadConfig() {
@@ -616,14 +617,6 @@ const SETTINGS_PAGE_SCRIPTS = `
       document.getElementById('concurrency-value').textContent = config.sync_concurrency || 8;
       syncDirs = config.sync_dirs || [];
       renderSyncDirs();
-
-      // Update button text for onboarding
-      if (window.__isOnboarding) {
-        document.getElementById('save-button-text').textContent = 'Next';
-        document.getElementById('save-button-icon-check').classList.add('hidden');
-        document.getElementById('save-button-icon-arrow').classList.remove('hidden');
-        lucide.createIcons();
-      }
     } catch (err) {
       console.error('Failed to load config:', err);
     }
@@ -752,8 +745,8 @@ const SETTINGS_PAGE_SCRIPTS = `
         saveStatus.textContent = 'Saved successfully!';
         saveStatus.className = 'text-sm text-green-400';
         // Redirect to about page after successful save only during onboarding
-        if (window.__isOnboarding) {
-          window.location.href = '/about';
+        if (redirectAfterSave) {
+          window.location.href = redirectAfterSave;
         } else {
           originalConfig = JSON.parse(JSON.stringify(config));
           syncDirs = config.sync_dirs;
@@ -851,13 +844,23 @@ app.get('/', async (c) => {
 // Serve settings page
 app.get('/settings', async (c) => {
   const layout = await getLayout();
-  const content = await readFile(join(__dirname, 'config.html'), 'utf-8');
+  let content = await readFile(join(__dirname, 'config.html'), 'utf-8');
   const isOnboarding = !hasFlag(FLAGS.ONBOARDED);
-  const onboardingScript = `<script>window.__isOnboarding = ${isOnboarding};</script>`;
+
+  // Replace button text/icons based on onboarding state
+  content = content
+    .replace('{{SAVE_BUTTON_TEXT}}', isOnboarding ? 'Next' : 'Save')
+    .replace('{{HIDE_CHECK_ICON}}', isOnboarding ? 'hidden' : '')
+    .replace('{{HIDE_ARROW_ICON}}', isOnboarding ? '' : 'hidden');
+
+  // Inject redirect URL into scripts
+  const redirectUrl = isOnboarding ? '/about' : '';
+  const scriptsWithRedirect = SETTINGS_PAGE_SCRIPTS.replace('{{REDIRECT_AFTER_SAVE}}', redirectUrl);
+
   const html = await composePage(layout, content, {
     title: 'Settings - Proton Drive Sync',
     activeTab: 'settings',
-    pageScripts: onboardingScript + SETTINGS_PAGE_SCRIPTS,
+    pageScripts: scriptsWithRedirect,
     isOnboarded: !isOnboarding,
   });
   return c.html(html);

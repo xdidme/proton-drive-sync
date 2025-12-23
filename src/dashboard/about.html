@@ -27,7 +27,7 @@
     </p>
 
     <!-- Badges -->
-    <div class="flex items-center gap-3 mb-8 flex-wrap justify-center">
+    <div class="flex items-center gap-3 mb-4 flex-wrap justify-center">
       <!-- X (Twitter) Badge -->
       <a
         href="https://x.com/TheBitFlipper"
@@ -62,16 +62,19 @@
       </a>
     </div>
 
-    <!-- Start Using Button (only shown during onboarding) -->
+    <!-- Start Using Link (only shown during onboarding) -->
     <div id="start-using-container" class="{{HIDE_START_BUTTON}} mb-8">
-      <button
-        onclick="startUsing()"
+      <a
+        href="#"
+        onclick="
+          startUsing();
+          return false;
+        "
         id="start-using-button"
-        class="flex items-center gap-2 px-6 py-3 bg-proton hover:bg-proton-dark text-white text-base font-medium rounded-lg transition-colors"
+        class="text-gray-400 hover:text-gray-300 text-sm transition-colors"
       >
-        <i data-lucide="rocket" class="w-5 h-5"></i>
-        Start Using
-      </button>
+        Skip → Start using
+      </a>
     </div>
 
     <!-- Version -->

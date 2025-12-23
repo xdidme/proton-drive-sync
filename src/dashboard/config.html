@@ -62,9 +62,9 @@
       id="save-button"
       class="flex items-center gap-1 px-4 py-2 bg-proton hover:bg-proton-dark text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
     >
-      <span id="save-button-text">Save</span>
-      <i id="save-button-icon-check" data-lucide="check" class="w-4 h-4"></i>
-      <i id="save-button-icon-arrow" data-lucide="arrow-right" class="w-4 h-4 hidden"></i>
+      {{SAVE_BUTTON_TEXT}}
+      <i data-lucide="check" class="w-4 h-4 {{HIDE_CHECK_ICON}}"></i>
+      <i data-lucide="arrow-right" class="w-4 h-4 {{HIDE_ARROW_ICON}}"></i>
     </button>
   </div>
 </div>
