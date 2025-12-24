@@ -1,4 +1,4 @@
-.PHONY: install build dev pre-commit publish clean db-inspect
+.PHONY: install build build-check dev pre-commit publish clean db-inspect
 
 # Install dependencies
 install:
@@ -7,6 +7,10 @@ install:
 # Build standalone binary with bun
 build:
 	bun build --compile --minify ./src/index.ts --outfile ./dist/proton-drive-sync
+
+# Type-check without emitting files
+build-check:
+	bun run build:check
 
 # Run directly with bun in watch mode (auto-reload on file changes)
 dev:
