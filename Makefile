@@ -1,4 +1,4 @@
-.PHONY: install build build-check dev pre-commit publish clean db-inspect
+.PHONY: install build build-check run dev pre-commit publish clean db-inspect
 
 # Install dependencies
 install:
@@ -12,9 +12,13 @@ build:
 build-check:
 	bun run build:check
 
+# Run directly with bun (one-off commands)
+run:
+	PATH="$(PWD)/dist:$(PATH)" PROTON_DEV=1 bun src/index.ts $(ARGS)
+
 # Run directly with bun in watch mode (auto-reload on file changes)
 dev:
-	PROTON_DEV=1 bun --watch src/index.ts $(ARGS)
+	PATH="$(PWD)/dist:$(PATH)" PROTON_DEV=1 bun --watch src/index.ts start --watch
 
 # Run pre-commit checks on all files
 pre-commit:

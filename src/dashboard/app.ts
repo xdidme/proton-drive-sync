@@ -29,7 +29,12 @@ import {
 import { FLAGS, setFlag, clearFlag, hasFlag } from '../flags.js';
 import { sendSignal } from '../signals.js';
 import { CONFIG_FILE, CONFIG_CHECK_SIGNAL } from '../config.js';
-import { isServiceInstalled, loadSyncService, unloadSyncService } from '../cli/service.js';
+import {
+  isServiceInstalled,
+  loadSyncService,
+  unloadSyncService,
+  serviceInstallCommand,
+} from '../cli/service.js';
 import type {
   DashboardDiff,
   AuthStatusUpdate,
@@ -689,13 +694,8 @@ const SETTINGS_PAGE_SCRIPTS = `
     try {
       const response = await fetch('/api/service-status');
       const data = await response.json();
-      const section = document.getElementById('start-on-login-section');
-      
-      if (data.installed) {
-        section.classList.remove('hidden');
-        serviceEnabled = data.enabled;
-        updateToggleUI();
-      }
+      serviceEnabled = data.enabled;
+      updateToggleUI();
     } catch (err) {
       console.error('Failed to load service status:', err);
     }
@@ -1129,18 +1129,23 @@ app.get('/api/service-status', (c) => {
 });
 
 /** Toggle service start-on-login */
-app.post('/api/toggle-service', (c) => {
-  if (!isServiceInstalled()) {
-    return c.json({ error: 'Service not installed' }, 400);
-  }
-
+app.post('/api/toggle-service', async (c) => {
+  const isInstalled = isServiceInstalled();
   const isEnabled = hasFlag(FLAGS.SERVICE_LOADED);
+
   if (isEnabled) {
+    // Disable: just unload, don't uninstall
     unloadSyncService();
     return c.json({ success: true, enabled: false });
   } else {
-    const success = loadSyncService();
-    return c.json({ success, enabled: success });
+    // Enable: install if needed, then load
+    if (!isInstalled) {
+      const success = await serviceInstallCommand(false);
+      return c.json({ success, enabled: success });
+    } else {
+      const success = loadSyncService();
+      return c.json({ success, enabled: success });
+    }
   }
 });
 

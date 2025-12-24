@@ -8,7 +8,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import * as readline from 'readline';
 import { sendSignal } from '../signals.js';
-import { setFlag, clearFlag, FLAGS } from '../flags.js';
+import { setFlag, clearFlag, hasFlag, FLAGS } from '../flags.js';
 // @ts-expect-error Bun text imports
 import watchmanPlistTemplate from './templates/watchman.plist' with { type: 'text' };
 // @ts-expect-error Bun text imports
@@ -36,23 +36,19 @@ const WATCHMAN_PLIST_PATH = join(PLIST_DIR, `${WATCHMAN_SERVICE_NAME}.plist`);
 const SERVICE_NAME = 'com.damianb-bitflipper.proton-drive-sync';
 const PLIST_PATH = join(PLIST_DIR, `${SERVICE_NAME}.plist`);
 
-function getWatchmanPath(): string {
+function getWatchmanPathSafe(): string | null {
   try {
     return execSync('which watchman', { encoding: 'utf-8' }).trim();
   } catch {
-    console.error('Error: watchman not found in PATH.');
-    console.error('Install from: https://facebook.github.io/watchman/docs/install');
-    process.exit(1);
+    return null;
   }
 }
 
-function getBinPath(): string {
+function getBinPathSafe(): string | null {
   try {
     return execSync('which proton-drive-sync', { encoding: 'utf-8' }).trim();
   } catch {
-    console.error('Error: proton-drive-sync not found in PATH.');
-    console.error('Make sure the CLI is installed globally with: npm install -g proton-drive-sync');
-    process.exit(1);
+    return null;
   }
 }
 
@@ -96,14 +92,26 @@ function unloadService(name: string, plistPath: string): void {
   }
 }
 
-export async function serviceInstallCommand(): Promise<void> {
+export async function serviceInstallCommand(interactive: boolean = true): Promise<boolean> {
   if (process.platform !== 'darwin') {
-    console.error('Error: Service installation is only supported on macOS.');
-    process.exit(1);
+    if (interactive) {
+      console.error('Error: Service installation is only supported on macOS.');
+      process.exit(1);
+    }
+    return false;
   }
 
-  const watchmanPath = getWatchmanPath();
-  const binPath = getBinPath();
+  const binPath = getBinPathSafe();
+  if (!binPath) {
+    if (interactive) {
+      console.error('Error: proton-drive-sync not found in PATH.');
+      console.error(
+        'Install with: curl -fsSL https://www.damianb.dev/proton-drive-sync/install.sh | bash'
+      );
+      process.exit(1);
+    }
+    return false;
+  }
 
   // Create LaunchAgents directory if it doesn't exist
   if (!existsSync(PLIST_DIR)) {
@@ -112,24 +120,32 @@ export async function serviceInstallCommand(): Promise<void> {
 
   let installedAny = false;
 
-  // Ask about watchman service
-  const installWatchman = await askYesNo('Install watchman service?');
-  if (installWatchman) {
-    console.log('Installing watchman service...');
-    if (existsSync(WATCHMAN_PLIST_PATH)) {
-      unloadService(WATCHMAN_SERVICE_NAME, WATCHMAN_PLIST_PATH);
+  // Ask about watchman service (only in interactive mode)
+  if (interactive) {
+    const watchmanPath = getWatchmanPathSafe();
+    if (!watchmanPath) {
+      console.log('Watchman not found in PATH. Skipping watchman service.');
+      console.log('Install from: https://facebook.github.io/watchman/docs/install');
+    } else {
+      const installWatchman = await askYesNo('Install watchman service?');
+      if (installWatchman) {
+        console.log('Installing watchman service...');
+        if (existsSync(WATCHMAN_PLIST_PATH)) {
+          unloadService(WATCHMAN_SERVICE_NAME, WATCHMAN_PLIST_PATH);
+        }
+        writeFileSync(WATCHMAN_PLIST_PATH, generateWatchmanPlist(watchmanPath));
+        console.log(`Created: ${WATCHMAN_PLIST_PATH}`);
+        loadService(WATCHMAN_SERVICE_NAME, WATCHMAN_PLIST_PATH);
+        console.log('Watchman service installed and started.');
+        installedAny = true;
+      } else {
+        console.log('Skipping watchman service.');
+      }
     }
-    writeFileSync(WATCHMAN_PLIST_PATH, generateWatchmanPlist(watchmanPath));
-    console.log(`Created: ${WATCHMAN_PLIST_PATH}`);
-    loadService(WATCHMAN_SERVICE_NAME, WATCHMAN_PLIST_PATH);
-    console.log('Watchman service installed and started.');
-    installedAny = true;
-  } else {
-    console.log('Skipping watchman service.');
   }
 
-  // Ask about proton-drive-sync service
-  const installSync = await askYesNo('Install proton-drive-sync service?');
+  // Install proton-drive-sync service
+  const installSync = interactive ? await askYesNo('Install proton-drive-sync service?') : true;
   if (installSync) {
     console.log('Installing proton-drive-sync service...');
     if (existsSync(PLIST_PATH)) {
@@ -137,7 +153,8 @@ export async function serviceInstallCommand(): Promise<void> {
     }
     writeFileSync(PLIST_PATH, generateSyncPlist(binPath));
     console.log(`Created: ${PLIST_PATH}`);
-    loadService(SERVICE_NAME, PLIST_PATH);
+    setFlag(FLAGS.SERVICE_INSTALLED);
+    loadSyncService();
     console.log('proton-drive-sync service installed and started.');
     console.log('View logs with: proton-drive-sync logs');
     installedAny = true;
@@ -148,6 +165,8 @@ export async function serviceInstallCommand(): Promise<void> {
   if (!installedAny) {
     console.log('\nNo services were installed.');
   }
+
+  return installedAny;
 }
 
 export async function serviceUninstallCommand(): Promise<void> {
@@ -177,8 +196,9 @@ export async function serviceUninstallCommand(): Promise<void> {
     const uninstallSync = await askYesNo('Uninstall proton-drive-sync service?');
     if (uninstallSync) {
       console.log('Uninstalling proton-drive-sync service...');
-      unloadService(SERVICE_NAME, PLIST_PATH);
+      unloadSyncService();
       unlinkSync(PLIST_PATH);
+      clearFlag(FLAGS.SERVICE_INSTALLED);
       console.log('proton-drive-sync service uninstalled.');
       uninstalledAny = true;
     } else {
@@ -192,10 +212,10 @@ export async function serviceUninstallCommand(): Promise<void> {
 }
 
 /**
- * Check if the service plist file exists (i.e., service is installed)
+ * Check if the service is installed (using flag)
  */
 export function isServiceInstalled(): boolean {
-  return existsSync(PLIST_PATH);
+  return hasFlag(FLAGS.SERVICE_INSTALLED);
 }
 
 /**

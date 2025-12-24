@@ -10,24 +10,31 @@ make install
 
 ## Running Locally
 
-The canonical way to develop is via the `make dev` command, which runs the app directly with tsx (no build step required):
+The canonical way to develop is via the `make dev` command, which runs the app directly with bun in watch mode (auto-reload on file changes):
 
 ```bash
-make dev ARGS="start"
+make dev
 ```
 
-> **Note:** In dev mode, use `Ctrl+C` to stop the process. The `proton-drive-sync stop` command does not work with `make dev` because `tsx watch` keeps the process alive.
+This runs `start --watch` automatically. Use `Ctrl+C` to stop.
+
+For one-off commands (like service install), use `make run`:
+
+```bash
+make run ARGS="service install"
+```
 
 ## Make Commands
 
-| Command           | Description                               |
-| ----------------- | ----------------------------------------- |
-| `make install`    | Install dependencies                      |
-| `make build`      | Build standalone binary                   |
-| `make dev ARGS=…` | Run directly with tsx (no build required) |
-| `make pre-commit` | Run lint and format on all files          |
-| `make clean`      | Remove build artifacts                    |
-| `make db-inspect` | Open Drizzle Studio to inspect database   |
+| Command           | Description                                       |
+| ----------------- | ------------------------------------------------- |
+| `make install`    | Install dependencies                              |
+| `make build`      | Build standalone binary to `./dist`               |
+| `make dev`        | Run `start --watch` with bun (auto-reload)        |
+| `make run ARGS=…` | Run one-off commands with bun (exits on complete) |
+| `make pre-commit` | Run lint and format on all files                  |
+| `make clean`      | Remove build artifacts                            |
+| `make db-inspect` | Open Drizzle Studio to inspect database           |
 
 ## Publishing
 
