@@ -883,6 +883,7 @@ app.get('/api/events', async (c) => {
         FRAG.processingTitle,
         FRAG.pauseButton,
         FRAG.stopSection,
+        FRAG.processingQueue, // Re-render to update spinners when paused/resumed
       ]);
       stream.writeSSE({ event: 'heartbeat', data: '' });
     };
