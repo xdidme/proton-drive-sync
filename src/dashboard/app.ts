@@ -34,7 +34,6 @@ import {
   serviceInstallCommand,
 } from '../cli/service.js';
 import {
-  type DashboardDiff,
   type AuthStatusUpdate,
   type DashboardJob,
   type DashboardStatus,
@@ -1400,104 +1399,102 @@ app.get('/api/auth', (c) => {
 // SSE Endpoints - Send HTML Fragments
 // ============================================================================
 
+/** Push multiple fragments to an SSE stream in one go */
+function pushFragments(
+  stream: { writeSSE: (msg: { event: string; data: string }) => void },
+  s: DashboardSnapshot,
+  keys: FragmentKey[]
+) {
+  for (const key of keys) {
+    stream.writeSSE({ event: key, data: renderFragment(key, s) });
+  }
+}
+
+/** Get a comparable string of processing job IDs for change detection */
+function processingIds(jobs: DashboardJob[]): string {
+  return jobs
+    .map((j) => j.id)
+    .sort((a, b) => a - b)
+    .join(',');
+}
+
 // GET /api/events - SSE stream of HTML fragment updates
 app.get('/api/events', async (c) => {
   return streamSSE(c, async (stream) => {
-    // Track previous state to avoid unnecessary re-renders
-    let lastProcessingJobIds: number[] = [];
-    let lastSyncStatus: SyncStatus = currentSyncStatus;
+    // Track processing jobs to avoid unnecessary re-renders
+    let lastProcessing = '';
 
-    const stateDiffHandler = (_diff: DashboardDiff) => {
-      // Snapshot state once per update
+    // Initial full push
+    const initialSnapshot = snapshot();
+    lastProcessing = processingIds(initialSnapshot.processing);
+    pushFragments(stream, initialSnapshot, [
+      FRAG.stats,
+      FRAG.auth,
+      FRAG.paused,
+      FRAG.syncing,
+      FRAG.processingTitle,
+      FRAG.pauseButton,
+      FRAG.processingQueue,
+      FRAG.blockedQueue,
+      FRAG.pendingQueue,
+      FRAG.recentQueue,
+      FRAG.retryQueue,
+      FRAG.stopSection,
+      FRAG.dryRunBanner,
+      FRAG.configInfo,
+    ]);
+
+    // Job diff: push job-related fragments (processing-queue only if changed)
+    const onJobDiff = () => {
       const s = snapshot();
+      const curProcessing = processingIds(s.processing);
 
-      stream.writeSSE({ event: FRAG.stats, data: renderFragment(FRAG.stats, s) });
+      // Always push stats & non-heavy lists
+      pushFragments(stream, s, [
+        FRAG.stats,
+        FRAG.blockedQueue,
+        FRAG.pendingQueue,
+        FRAG.recentQueue,
+        FRAG.retryQueue,
+      ]);
 
-      // Only send processing-queue if the jobs actually changed
-      const currentJobIds = s.processing.map((j) => j.id).sort((a, b) => a - b);
-      const jobsChanged =
-        currentJobIds.length !== lastProcessingJobIds.length ||
-        currentJobIds.some((id, i) => id !== lastProcessingJobIds[i]);
-
-      if (jobsChanged) {
-        lastProcessingJobIds = currentJobIds;
-        stream.writeSSE({
-          event: FRAG.processingQueue,
-          data: renderFragment(FRAG.processingQueue, s),
-        });
+      // Only push processing queue if changed
+      if (curProcessing !== lastProcessing) {
+        lastProcessing = curProcessing;
+        pushFragments(stream, s, [FRAG.processingQueue]);
       }
-
-      stream.writeSSE({ event: FRAG.blockedQueue, data: renderFragment(FRAG.blockedQueue, s) });
-      stream.writeSSE({ event: FRAG.pendingQueue, data: renderFragment(FRAG.pendingQueue, s) });
-      stream.writeSSE({ event: FRAG.recentQueue, data: renderFragment(FRAG.recentQueue, s) });
-      stream.writeSSE({ event: FRAG.retryQueue, data: renderFragment(FRAG.retryQueue, s) });
     };
 
-    const statusHandler = (status: DashboardStatus) => {
-      // Build snapshot with current status
+    // Status change: push status-related fragments
+    const onStatus = (status: DashboardStatus) => {
       const s: DashboardSnapshot = {
         ...snapshot(),
         auth: status.auth,
         syncStatus: status.syncStatus,
       };
-
-      stream.writeSSE({ event: FRAG.auth, data: renderFragment(FRAG.auth, s) });
-      stream.writeSSE({ event: FRAG.paused, data: renderFragment(FRAG.paused, s) });
-      stream.writeSSE({ event: FRAG.syncing, data: renderFragment(FRAG.syncing, s) });
-      stream.writeSSE({
-        event: FRAG.processingTitle,
-        data: renderFragment(FRAG.processingTitle, s),
-      });
-      stream.writeSSE({ event: FRAG.stopSection, data: renderFragment(FRAG.stopSection, s) });
-
-      // Only re-render processing-queue if sync status changed (affects pause button)
-      if (status.syncStatus !== lastSyncStatus) {
-        lastSyncStatus = status.syncStatus;
-        stream.writeSSE({
-          event: FRAG.processingQueue,
-          data: renderFragment(FRAG.processingQueue, s),
-        });
-        stream.writeSSE({ event: FRAG.pendingQueue, data: renderFragment(FRAG.pendingQueue, s) });
-      }
-
+      pushFragments(stream, s, [
+        FRAG.auth,
+        FRAG.paused,
+        FRAG.syncing,
+        FRAG.processingTitle,
+        FRAG.pauseButton,
+        FRAG.stopSection,
+      ]);
       stream.writeSSE({ event: 'heartbeat', data: '' });
     };
 
-    const heartbeatHandler = () => {
+    const onHeartbeat = () => {
       stream.writeSSE({ event: 'heartbeat', data: '' });
     };
 
-    stateDiffEvents.on('job_state_diff', stateDiffHandler);
-    statusEvents.on('status', statusHandler);
-    heartbeatEvents.on('heartbeat', heartbeatHandler);
+    stateDiffEvents.on('job_state_diff', onJobDiff);
+    statusEvents.on('status', onStatus);
+    heartbeatEvents.on('heartbeat', onHeartbeat);
 
-    // Send full initial state on connection using snapshot
-    const s = snapshot();
-
-    await stream.writeSSE({ event: FRAG.stats, data: renderFragment(FRAG.stats, s) });
-    await stream.writeSSE({ event: FRAG.auth, data: renderFragment(FRAG.auth, s) });
-    await stream.writeSSE({ event: FRAG.paused, data: renderFragment(FRAG.paused, s) });
-    await stream.writeSSE({ event: FRAG.syncing, data: renderFragment(FRAG.syncing, s) });
-    await stream.writeSSE({ event: FRAG.pauseButton, data: renderFragment(FRAG.pauseButton, s) });
-    await stream.writeSSE({
-      event: FRAG.processingTitle,
-      data: renderFragment(FRAG.processingTitle, s),
-    });
-    await stream.writeSSE({
-      event: FRAG.processingQueue,
-      data: renderFragment(FRAG.processingQueue, s),
-    });
-    await stream.writeSSE({ event: FRAG.blockedQueue, data: renderFragment(FRAG.blockedQueue, s) });
-    await stream.writeSSE({ event: FRAG.pendingQueue, data: renderFragment(FRAG.pendingQueue, s) });
-    await stream.writeSSE({ event: FRAG.recentQueue, data: renderFragment(FRAG.recentQueue, s) });
-    await stream.writeSSE({ event: FRAG.retryQueue, data: renderFragment(FRAG.retryQueue, s) });
-    await stream.writeSSE({ event: FRAG.stopSection, data: renderFragment(FRAG.stopSection, s) });
-
-    // Cleanup on close
     stream.onAbort(() => {
-      stateDiffEvents.off('job_state_diff', stateDiffHandler);
-      statusEvents.off('status', statusHandler);
-      heartbeatEvents.off('heartbeat', heartbeatHandler);
+      stateDiffEvents.off('job_state_diff', onJobDiff);
+      statusEvents.off('status', onStatus);
+      heartbeatEvents.off('heartbeat', onHeartbeat);
     });
 
     // Keep the stream open
