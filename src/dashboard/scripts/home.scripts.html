@@ -1,0 +1,79 @@
+<script>
+  // Log level filtering
+  let currentLogLevel = 20;
+
+  function setLogLevel(level) {
+    currentLogLevel = level;
+    // Update button styles
+    [20, 30, 40, 50].forEach((l) => {
+      const btn = document.getElementById('log-level-' + l);
+      if (btn) {
+        if (l === level) {
+          btn.className =
+            'px-2 py-0.5 text-[10px] font-medium rounded transition-all duration-200 bg-gray-700 text-gray-200 shadow-sm';
+        } else {
+          btn.className =
+            'px-2 py-0.5 text-[10px] font-medium rounded transition-all duration-200 text-gray-500 hover:text-gray-400 hover:bg-gray-800/50';
+        }
+      }
+    });
+    // Filter log lines
+    document.querySelectorAll('#logs-container > div[data-level]').forEach((el) => {
+      const logLevel = parseInt(el.getAttribute('data-level') || '0');
+      el.style.display = logLevel >= level ? '' : 'none';
+    });
+  }
+
+  // Apply filter to new log lines as they arrive
+  const logsContainer = document.getElementById('logs-container');
+  if (logsContainer) {
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeType === 1 && node.hasAttribute('data-level')) {
+            const logLevel = parseInt(node.getAttribute('data-level') || '0');
+            node.style.display = logLevel >= currentLogLevel ? '' : 'none';
+          }
+        });
+      });
+    });
+    observer.observe(logsContainer, { childList: true });
+  }
+
+  // Retry countdown timer
+  function updateRetryCountdowns() {
+    document.querySelectorAll('.retry-countdown').forEach((el) => {
+      const retryAt = el.getAttribute('data-retry-at');
+      if (!retryAt) return;
+      const retryTime = new Date(retryAt).getTime();
+      const now = Date.now();
+      const diffMs = retryTime - now;
+      if (diffMs <= 0) {
+        el.textContent = 'now';
+      } else {
+        const totalSecs = Math.ceil(diffMs / 1000);
+        const days = Math.floor(totalSecs / 86400);
+        const hours = Math.floor((totalSecs % 86400) / 3600);
+        const mins = Math.floor((totalSecs % 3600) / 60);
+        const secs = totalSecs % 60;
+        let text = 'in ';
+        if (days > 0) text += days + 'd ';
+        if (hours > 0) text += hours + 'h ';
+        if (mins > 0) text += mins + 'm ';
+        if (secs > 0 || totalSecs === 0) text += secs + 's';
+        el.textContent = text.trim();
+      }
+    });
+  }
+  setInterval(updateRetryCountdowns, 1000);
+  updateRetryCountdowns();
+
+  // Re-initialize Lucide icons after SSE updates
+  document.body.addEventListener('htmx:afterSwap', (e) => {
+    lucide.createIcons();
+    updateRetryCountdowns();
+  });
+  document.body.addEventListener('htmx:sseMessage', () => {
+    lucide.createIcons();
+  });
+</script>

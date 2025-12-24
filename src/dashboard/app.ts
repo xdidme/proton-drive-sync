@@ -45,11 +45,25 @@ import {
 } from './ipc.js';
 import type { Config } from '../config.js';
 
+// TSX Fragment Components
+import { Stats } from './views/fragments/Stats.js';
+import { ProcessingQueue } from './views/fragments/ProcessingQueue.js';
+import { BlockedQueue } from './views/fragments/BlockedQueue.js';
+import { RecentQueue } from './views/fragments/RecentQueue.js';
+import { PendingQueue } from './views/fragments/PendingQueue.js';
+import { RetryQueue } from './views/fragments/RetryQueue.js';
+import { PauseButton } from './views/fragments/PauseButton.js';
+
 // Embed HTML templates at compile time as text (required for compiled binaries)
 import layoutHtmlTemplate from './layout.html' with { type: 'text' };
 import homeHtmlTemplate from './home.html' with { type: 'text' };
 import controlsHtmlTemplate from './controls.html' with { type: 'text' };
 import aboutHtmlTemplate from './about.html' with { type: 'text' };
+
+// Embed page scripts at compile time
+import homeScripts from './scripts/home.scripts.html' with { type: 'text' };
+import controlsScripts from './scripts/controls.scripts.html' with { type: 'text' };
+import aboutScripts from './scripts/about.scripts.html' with { type: 'text' };
 
 // Embed assets at compile time (required for compiled binaries)
 import iconSvg from './assets/icon.svg' with { type: 'text' };
@@ -191,16 +205,6 @@ async function readParentMessages(): Promise<void> {
 // HTML Fragment Renderers
 // ============================================================================
 
-function formatPath(path: string): string {
-  return basename(path);
-}
-
-function formatTime(date: Date | string | undefined): string {
-  if (!date) return '';
-  const d = typeof date === 'string' ? new Date(date) : date;
-  return d.toLocaleTimeString();
-}
-
 /** Render stats cards HTML */
 function renderStats(counts: {
   pending: number;
@@ -208,272 +212,36 @@ function renderStats(counts: {
   synced: number;
   blocked: number;
 }): string {
-  return `
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-  <!-- Pending -->
-  <div class="bg-gray-800 rounded-xl p-5 border border-gray-700 shadow-sm hover:border-amber-500/50 transition-colors group relative overflow-hidden">
-    <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-      <i data-lucide="clock" class="w-12 h-12 text-amber-500"></i>
-    </div>
-    <dt class="text-sm font-medium text-gray-400">Pending</dt>
-    <dd class="mt-2 text-3xl font-bold text-white group-hover:text-amber-400 transition-colors">${counts.pending}</dd>
-  </div>
-
-  <!-- Processing -->
-  <div class="bg-gray-800 rounded-xl p-5 border border-gray-700 shadow-sm hover:border-blue-500/50 transition-colors group relative overflow-hidden">
-    <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-      <i data-lucide="refresh-cw" class="w-12 h-12 text-blue-500"></i>
-    </div>
-    <dt class="text-sm font-medium text-gray-400">Processing</dt>
-    <dd class="mt-2 text-3xl font-bold text-white group-hover:text-blue-400 transition-colors">${counts.processing}</dd>
-  </div>
-
-  <!-- Synced -->
-  <div class="bg-gray-800 rounded-xl p-5 border border-gray-700 shadow-sm hover:border-green-500/50 transition-colors group relative overflow-hidden">
-    <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-      <i data-lucide="check" class="w-12 h-12 text-green-500"></i>
-    </div>
-    <dt class="text-sm font-medium text-gray-400">Synced</dt>
-    <dd class="mt-2 text-3xl font-bold text-white group-hover:text-green-400 transition-colors">${counts.synced}</dd>
-  </div>
-
-  <!-- Blocked -->
-  <div class="bg-gray-800 rounded-xl p-5 border border-gray-700 shadow-sm hover:border-red-500/50 transition-colors group relative overflow-hidden">
-    <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-      <i data-lucide="triangle-alert" class="w-12 h-12 text-red-500"></i>
-    </div>
-    <dt class="text-sm font-medium text-gray-400">Blocked</dt>
-    <dd class="mt-2 text-3xl font-bold text-white group-hover:text-red-400 transition-colors">${counts.blocked}</dd>
-  </div>
-</div>`;
+  return Stats({ counts }).toString();
 }
 
 /** Render processing queue HTML (header with pause button + list) */
 function renderProcessingQueue(jobs: DashboardJob[]): string {
-  const isPaused = currentSyncStatus === 'paused';
-
-  const header = `
-<div class="px-5 py-4 border-b border-gray-700 flex justify-between items-center bg-gray-800/50 backdrop-blur rounded-t-xl">
-  <h2 id="processing-title" class="text-sm font-semibold text-gray-100 uppercase tracking-wider flex items-center gap-2" sse-swap="processing-title" hx-swap="innerHTML">
-    <span class="w-2 h-2 rounded-full ${isPaused ? 'bg-amber-500' : 'bg-blue-500 animate-pulse'}"></span>
-    ${isPaused ? 'Paused' : 'Active Transfers'}
-  </h2>
-  <div class="flex items-center gap-3">
-    <div id="pause-button">${renderPauseButton(currentSyncStatus)}</div>
-    <span class="text-xs font-mono text-gray-500">${jobs.length} items</span>
-  </div>
-</div>`;
-
-  const listContent =
-    jobs.length === 0
-      ? `
-<div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
-  <i data-lucide="zap" class="w-10 h-10 opacity-20"></i>
-  <p class="text-sm">Queue is empty</p>
-</div>`
-      : (() => {
-          const isActive =
-            currentSyncStatus === 'syncing' && currentAuthStatus.status === 'authenticated';
-          const icon = isActive
-            ? `<i data-lucide="refresh-cw" class="w-4 h-4 text-blue-500 mt-0.5 shrink-0 animate-spin"></i>`
-            : `<i data-lucide="clock" class="w-4 h-4 text-amber-500 mt-0.5 shrink-0"></i>`;
-
-          return `<div class="space-y-1">${jobs
-            .map(
-              (job) => `
-<div class="px-3 py-2.5 rounded-lg bg-gray-900/50 border border-gray-700/50 hover:border-blue-500/30 transition-colors group">
-  <div class="flex items-start gap-3">
-    ${icon}
-    <div class="min-w-0 flex-1">
-      <div class="text-xs font-mono text-gray-300 truncate">${escapeHtml(formatPath(job.localPath))}</div>
-      <div class="text-[10px] text-gray-500 mt-0.5 truncate">${escapeHtml(job.localPath)}</div>
-    </div>
-  </div>
-</div>`
-            )
-            .join('')}</div>`;
-        })();
-
-  const list = `<div class="flex-1 overflow-y-auto custom-scrollbar p-2">${listContent}</div>`;
-
-  return header + list;
+  return ProcessingQueue({
+    jobs,
+    syncStatus: currentSyncStatus,
+    authStatus: currentAuthStatus,
+  }).toString();
 }
 
 /** Render blocked queue HTML (header + list) */
 function renderBlockedQueue(jobs: DashboardJob[]): string {
-  const header = `
-<div class="px-5 py-4 border-b border-gray-700 flex justify-between items-center bg-gray-800/50 backdrop-blur rounded-t-xl min-h-[56px]">
-  <h2 class="text-sm font-semibold text-gray-100 uppercase tracking-wider flex items-center gap-2">
-    <span class="w-2 h-2 rounded-full bg-red-500"></span>
-    Failed Transfers
-  </h2>
-  <div class="flex items-center gap-3">
-    <div class="h-7"></div>
-    <span class="text-xs font-mono text-gray-500">${jobs.length} items</span>
-  </div>
-</div>`;
-
-  const listContent =
-    jobs.length === 0
-      ? `
-<div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
-  <i data-lucide="circle-check" class="w-10 h-10 opacity-20"></i>
-  <p class="text-sm">All systems nominal</p>
-</div>`
-      : `<div class="space-y-1">${jobs
-          .map(
-            (job) => `
-<div class="px-3 py-2.5 rounded-lg bg-red-500/5 border border-red-500/20 hover:bg-red-500/10 transition-colors group">
-  <div class="flex items-start gap-3">
-    <i data-lucide="triangle-alert" class="w-4 h-4 text-red-500 mt-0.5 shrink-0"></i>
-    <div class="min-w-0 flex-1">
-      <div class="text-xs font-mono text-red-200 truncate">${escapeHtml(formatPath(job.localPath))}</div>
-      <div class="text-[10px] text-red-400/70 mt-1 line-clamp-2">${escapeHtml(job.lastError || '')}</div>
-    </div>
-    <div class="shrink-0 text-[10px] font-mono text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded border border-red-500/20">
-      Retry: ${job.nRetries || 0}
-    </div>
-  </div>
-</div>`
-          )
-          .join('')}</div>`;
-
-  const list = `<div class="flex-1 overflow-y-auto custom-scrollbar p-2">${listContent}</div>`;
-
-  return header + list;
+  return BlockedQueue({ jobs }).toString();
 }
 
 /** Render recent queue HTML (header + list) */
 function renderRecentQueue(jobs: DashboardJob[]): string {
-  const header = `
-<div class="px-5 py-4 border-b border-gray-700 flex justify-between items-center bg-gray-800/50 backdrop-blur rounded-t-xl min-h-[56px]">
-  <h2 class="text-sm font-semibold text-gray-100 uppercase tracking-wider flex items-center gap-2">
-    <span class="w-2 h-2 rounded-full bg-green-500"></span>
-    Recently Synced
-  </h2>
-  <div class="flex items-center gap-3">
-    <div class="h-7"></div>
-    <span class="text-xs font-mono text-gray-500">${jobs.length} items</span>
-  </div>
-</div>`;
-
-  const listContent =
-    jobs.length === 0
-      ? `
-<div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
-  <p class="text-sm">No recent activity</p>
-</div>`
-      : `<div class="space-y-1">${jobs
-          .map(
-            (job) => `
-<div class="px-3 py-2 rounded-lg hover:bg-gray-700/50 transition-colors flex items-center gap-3">
-  <i data-lucide="check" class="w-4 h-4 text-green-500 shrink-0"></i>
-  <div class="min-w-0 flex-1 flex items-center justify-between gap-4">
-    <span class="text-xs font-mono text-gray-300 truncate">${escapeHtml(formatPath(job.localPath))}</span>
-    <span class="text-[10px] text-gray-500 font-mono whitespace-nowrap">${formatTime(job.createdAt)}</span>
-  </div>
-</div>`
-          )
-          .join('')}</div>`;
-
-  const list = `<div class="flex-1 overflow-y-auto custom-scrollbar p-2">${listContent}</div>`;
-
-  return header + list;
+  return RecentQueue({ jobs }).toString();
 }
 
 /** Render pending queue HTML (header + list) */
 function renderPendingQueue(jobs: DashboardJob[]): string {
-  const header = `
-<div class="px-5 py-4 border-b border-gray-700 flex justify-between items-center bg-gray-800/50 backdrop-blur rounded-t-xl">
-  <h2 class="text-sm font-semibold text-gray-100 uppercase tracking-wider flex items-center gap-2">
-    <span class="w-2 h-2 rounded-full bg-amber-500"></span>
-    Pending
-  </h2>
-  <div class="flex items-center gap-3">
-    <div class="h-7"></div>
-    <span class="text-xs font-mono text-gray-500">${jobs.length} items</span>
-  </div>
-</div>`;
-
-  const listContent =
-    jobs.length === 0
-      ? `
-<div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
-  <p class="text-sm">Queue empty</p>
-</div>`
-      : `<div class="space-y-1">${jobs
-          .map(
-            (job) => `
-<div class="px-3 py-2 rounded-lg hover:bg-gray-700/50 transition-colors flex items-center gap-3">
-  <i data-lucide="clock" class="w-4 h-4 text-amber-500 shrink-0"></i>
-  <div class="min-w-0 flex-1">
-    <span class="text-xs font-mono text-gray-300 truncate block">${escapeHtml(formatPath(job.localPath))}</span>
-  </div>
-</div>`
-          )
-          .join('')}</div>`;
-
-  const list = `<div class="flex-1 overflow-y-auto custom-scrollbar p-2">${listContent}</div>`;
-
-  return header + list;
+  return PendingQueue({ jobs }).toString();
 }
 
 /** Render retry queue HTML (header with button + list) */
 function renderRetryQueue(jobs: DashboardJob[]): string {
-  const retryAllButton =
-    jobs.length > 0
-      ? `
-<button
-  hx-post="/api/signal/retry-all-now"
-  hx-target="#retry-queue"
-  hx-swap="innerHTML"
-  class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-900 border border-orange-500/30 hover:border-orange-500/50 hover:bg-orange-500/10 transition-colors cursor-pointer"
->
-  <i data-lucide="refresh-cw" class="h-3 w-3 text-orange-400"></i>
-  <span class="text-xs font-medium text-orange-400">Retry All Now</span>
-</button>`
-      : '';
-
-  const header = `
-<div class="px-5 py-4 border-b border-gray-700 flex justify-between items-center bg-gray-800/50 backdrop-blur rounded-t-xl min-h-[56px]">
-  <h2 class="text-sm font-semibold text-gray-100 uppercase tracking-wider flex items-center gap-2">
-    <span class="w-2 h-2 rounded-full bg-orange-500"></span>
-    Retry Queue
-  </h2>
-  <div class="flex items-center gap-3">
-    ${retryAllButton || '<div class="h-7"></div>'}
-    <span class="text-xs font-mono text-gray-500">${jobs.length} items</span>
-  </div>
-</div>`;
-
-  const listContent =
-    jobs.length === 0
-      ? `
-<div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
-  <i data-lucide="circle-check" class="w-10 h-10 opacity-20"></i>
-  <p class="text-sm">No scheduled retries</p>
-</div>`
-      : `<div class="space-y-1">${jobs
-          .map((job) => {
-            const retryAtIso = job.retryAt
-              ? typeof job.retryAt === 'string'
-                ? job.retryAt
-                : job.retryAt.toISOString()
-              : '';
-            return `
-<div class="px-3 py-2 rounded-lg hover:bg-gray-700/50 transition-colors flex items-center gap-3">
-  <i data-lucide="refresh-cw" class="w-4 h-4 text-orange-500 shrink-0"></i>
-  <div class="min-w-0 flex-1 flex items-center justify-between gap-4">
-    <span class="text-xs font-mono text-gray-300 truncate">${escapeHtml(formatPath(job.localPath))}</span>
-    <span class="text-[10px] text-orange-400 font-mono whitespace-nowrap retry-countdown" data-retry-at="${retryAtIso}"></span>
-  </div>
-</div>`;
-          })
-          .join('')}</div>`;
-
-  const list = `<div class="flex-1 overflow-y-auto custom-scrollbar p-2">${listContent}</div>`;
-
-  return header + list;
+  return RetryQueue({ jobs }).toString();
 }
 
 /** Render auth status HTML */
@@ -596,33 +364,7 @@ function renderSyncingBadge(syncStatus: SyncStatus): string {
 
 /** Render pause/resume button (hidden when disconnected) */
 function renderPauseButton(syncStatus: SyncStatus): string {
-  if (syncStatus === 'disconnected') {
-    return '<div id="pause-button" class="h-7"></div>';
-  }
-  if (syncStatus === 'paused') {
-    // Show resume button
-    return `
-<button
-  id="pause-button"
-  hx-post="/api/toggle-pause"
-  hx-swap="outerHTML"
-  class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-900 border border-green-500/30 hover:border-green-500/50 hover:bg-green-500/10 transition-colors cursor-pointer"
->
-  <i data-lucide="circle-play" class="h-3 w-3 text-green-400"></i>
-  <span class="text-xs font-medium text-green-400">Resume Sync</span>
-</button>`;
-  }
-  // Show pause button (syncing state)
-  return `
-<button
-  id="pause-button"
-  hx-post="/api/toggle-pause"
-  hx-swap="outerHTML"
-  class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-900 border border-gray-600 hover:border-amber-500/50 hover:bg-amber-500/10 transition-colors cursor-pointer"
->
-  <i data-lucide="circle-pause" class="h-3 w-3 text-gray-400 hover:text-amber-400"></i>
-  <span class="text-xs font-medium text-gray-400">Pause Sync</span>
-</button>`;
+  return PauseButton({ syncStatus }).toString();
 }
 
 /** Render dry-run banner HTML */
@@ -775,322 +517,11 @@ export function renderFragment(key: FragmentKey, s: DashboardSnapshot): string {
 const app = new Hono();
 let isDryRun = false;
 
-// Page-specific scripts
-const HOME_PAGE_SCRIPTS = `
-<script>
-  // Log level filtering
-  let currentLogLevel = 20;
-  
-  function setLogLevel(level) {
-    currentLogLevel = level;
-    // Update button styles
-    [20, 30, 40, 50].forEach(l => {
-      const btn = document.getElementById('log-level-' + l);
-      if (btn) {
-        if (l === level) {
-          btn.className = 'px-2 py-0.5 text-[10px] font-medium rounded transition-all duration-200 bg-gray-700 text-gray-200 shadow-sm';
-        } else {
-          btn.className = 'px-2 py-0.5 text-[10px] font-medium rounded transition-all duration-200 text-gray-500 hover:text-gray-400 hover:bg-gray-800/50';
-        }
-      }
-    });
-    // Filter log lines
-    document.querySelectorAll('#logs-container > div[data-level]').forEach(el => {
-      const logLevel = parseInt(el.getAttribute('data-level') || '0');
-      el.style.display = logLevel >= level ? '' : 'none';
-    });
-  }
-
-  // Apply filter to new log lines as they arrive
-  const logsContainer = document.getElementById('logs-container');
-  if (logsContainer) {
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        mutation.addedNodes.forEach((node) => {
-          if (node.nodeType === 1 && node.hasAttribute('data-level')) {
-            const logLevel = parseInt(node.getAttribute('data-level') || '0');
-            node.style.display = logLevel >= currentLogLevel ? '' : 'none';
-          }
-        });
-      });
-    });
-    observer.observe(logsContainer, { childList: true });
-  }
-
-  // Retry countdown timer
-  function updateRetryCountdowns() {
-    document.querySelectorAll('.retry-countdown').forEach(el => {
-      const retryAt = el.getAttribute('data-retry-at');
-      if (!retryAt) return;
-      const retryTime = new Date(retryAt).getTime();
-      const now = Date.now();
-      const diffMs = retryTime - now;
-      if (diffMs <= 0) {
-        el.textContent = 'now';
-      } else {
-        const totalSecs = Math.ceil(diffMs / 1000);
-        const days = Math.floor(totalSecs / 86400);
-        const hours = Math.floor((totalSecs % 86400) / 3600);
-        const mins = Math.floor((totalSecs % 3600) / 60);
-        const secs = totalSecs % 60;
-        let text = 'in ';
-        if (days > 0) text += days + 'd ';
-        if (hours > 0) text += hours + 'h ';
-        if (mins > 0) text += mins + 'm ';
-        if (secs > 0 || totalSecs === 0) text += secs + 's';
-        el.textContent = text.trim();
-      }
-    });
-  }
-  setInterval(updateRetryCountdowns, 1000);
-  updateRetryCountdowns();
-
-  // Re-initialize Lucide icons after SSE updates
-  document.body.addEventListener('htmx:afterSwap', (e) => {
-    lucide.createIcons();
-    updateRetryCountdowns();
-  });
-  document.body.addEventListener('htmx:sseMessage', () => {
-    lucide.createIcons();
-  });
-</script>`;
-
-const SETTINGS_PAGE_SCRIPTS = `
-<script>
-  let syncDirs = [];
-  let originalConfig = null;
-  let serviceEnabled = false;
-  const redirectAfterSave = '{{REDIRECT_AFTER_SAVE}}';
-
-  // Load current config and service status on page load
-  async function loadConfig() {
-    try {
-      const response = await fetch('/api/config');
-      const data = await response.json();
-      const config = data.config;
-      originalConfig = JSON.parse(JSON.stringify(config));
-
-      document.getElementById('sync-concurrency').value = config.sync_concurrency || 8;
-      document.getElementById('concurrency-value').textContent = config.sync_concurrency || 8;
-      syncDirs = config.sync_dirs || [];
-      renderSyncDirs();
-    } catch (err) {
-      console.error('Failed to load config:', err);
-    }
-  }
-
-  async function loadServiceStatus() {
-    try {
-      const response = await fetch('/api/service-status');
-      const data = await response.json();
-      serviceEnabled = data.enabled;
-      updateToggleUI();
-    } catch (err) {
-      console.error('Failed to load service status:', err);
-    }
-  }
-
-  function updateToggleUI() {
-    const toggle = document.getElementById('start-on-login-toggle');
-    const knob = document.getElementById('start-on-login-knob');
-    
-    if (serviceEnabled) {
-      toggle.classList.remove('bg-gray-600');
-      toggle.classList.add('bg-proton');
-      toggle.setAttribute('aria-checked', 'true');
-      knob.classList.remove('translate-x-1');
-      knob.classList.add('translate-x-6');
-    } else {
-      toggle.classList.remove('bg-proton');
-      toggle.classList.add('bg-gray-600');
-      toggle.setAttribute('aria-checked', 'false');
-      knob.classList.remove('translate-x-6');
-      knob.classList.add('translate-x-1');
-    }
-  }
-
-  async function toggleStartOnLogin() {
-    const toggle = document.getElementById('start-on-login-toggle');
-    toggle.disabled = true;
-    
-    try {
-      const response = await fetch('/api/toggle-service', { method: 'POST' });
-      const data = await response.json();
-      
-      if (data.success) {
-        serviceEnabled = data.enabled;
-        updateToggleUI();
-      }
-    } catch (err) {
-      console.error('Failed to toggle service:', err);
-    } finally {
-      toggle.disabled = false;
-    }
-  }
-
-  function renderSyncDirs() {
-    const container = document.getElementById('sync-dirs-list');
-    const noMessage = document.getElementById('no-dirs-message');
-
-    if (syncDirs.length === 0) {
-      container.innerHTML = '';
-      noMessage.classList.remove('hidden');
-      return;
-    }
-
-    noMessage.classList.add('hidden');
-    container.innerHTML = syncDirs
-      .map(
-        (dir, index) => \`
-      <div class="flex items-center gap-3 p-4 bg-gray-900 border border-gray-700 rounded-lg group">
-        <div class="flex-1 grid grid-cols-2 gap-4">
-          <div>
-            <label class="block text-xs text-gray-500 mb-1">Local Path</label>
-            <input
-              type="text"
-              value="\${escapeHtml(dir.source_path)}"
-              onchange="updateSyncDir(\${index}, 'source_path', this.value)"
-              placeholder="/path/to/local/directory"
-              class="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-proton"
-            />
-          </div>
-          <div>
-            <div class="flex items-center gap-1 mb-1">
-              <label class="block text-xs text-gray-500">Remote Root</label>
-              <div class="relative group">
-                <i data-lucide="info" class="w-3 h-3 text-gray-500 cursor-help"></i>
-                <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-xs text-gray-300 w-96 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
-                  The destination folder in Proton Drive. Must start with / indicating the base of the Proton Drive filesystem.
-                </div>
-              </div>
-            </div>
-            <input
-              type="text"
-              value="\${escapeHtml(dir.remote_root || '/')}"
-              onchange="updateSyncDir(\${index}, 'remote_root', this.value)"
-              placeholder="/"
-              class="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-proton"
-            />
-          </div>
-        </div>
-        <button
-          onclick="removeSyncDir(\${index})"
-          class="p-2 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-          title="Remove directory"
-        >
-          <i data-lucide="trash-2" class="w-5 h-5"></i>
-        </button>
-      </div>
-    \`
-      )
-      .join('');
-
-    // Re-initialize Lucide icons for dynamically added content
-    lucide.createIcons();
-  }
-
-  function addSyncDir() {
-    syncDirs.push({ source_path: '', remote_root: '/' });
-    renderSyncDirs();
-  }
-
-  function removeSyncDir(index) {
-    syncDirs.splice(index, 1);
-    renderSyncDirs();
-  }
-
-  function updateSyncDir(index, field, value) {
-    if (field === 'remote_root') {
-      const input = event.target;
-      if (value && !value.startsWith('/')) {
-        input.classList.add('border-red-500');
-        input.setCustomValidity('Remote root must start with /');
-        return;
-      } else {
-        input.classList.remove('border-red-500');
-        input.setCustomValidity('');
-      }
-    }
-    syncDirs[index][field] = value;
-  }
-
-  async function saveConfig() {
-    const saveButton = document.getElementById('save-button');
-
-    // Validate
-    const validDirs = syncDirs.filter((d) => d.source_path.trim());
-    if (validDirs.length === 0) {
-      showToast('At least one sync directory is required', 'error', 5000);
-      return;
-    }
-
-    const config = {
-      sync_concurrency: parseInt(document.getElementById('sync-concurrency').value) || 8,
-      sync_dirs: validDirs.map((d) => ({
-        source_path: d.source_path.trim(),
-        remote_root: d.remote_root?.trim() || '',
-      })),
-    };
-
-    saveButton.disabled = true;
-
-    try {
-      const response = await fetch('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        showToast('Settings saved successfully!', 'success');
-        // Redirect to about page after successful save only during onboarding
-        if (redirectAfterSave) {
-          window.location.href = redirectAfterSave;
-        } else {
-          originalConfig = JSON.parse(JSON.stringify(config));
-          syncDirs = config.sync_dirs;
-          renderSyncDirs();
-        }
-      } else {
-        showToast(result.error || 'Failed to save settings', 'error', 5000);
-      }
-    } catch (err) {
-      showToast('Error saving settings', 'error', 5000);
-    } finally {
-      saveButton.disabled = false;
-    }
-  }
-
-  function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
-
-  async function stopService() {
-    const button = document.getElementById('stop-button');
-    button.disabled = true;
-
-    try {
-      const response = await fetch('/api/signal/stop', { method: 'POST' });
-      if (response.ok) {
-        showToast('Service stopping...', 'info');
-      } else {
-        showToast('Failed to stop service', 'error', 5000);
-        button.disabled = false;
-      }
-    } catch (err) {
-      showToast('Error stopping service', 'error', 5000);
-      button.disabled = false;
-    }
-  }
-
-  // Load config and service status on page load
-  loadConfig();
-  loadServiceStatus();
-</script>`;
+/** Get controls scripts with redirect URL injected */
+function controlsScriptsWithRedirect(isOnboarding: boolean): string {
+  const redirectUrl = isOnboarding ? '/about' : '';
+  return controlsScripts.replace('{{REDIRECT_AFTER_SAVE}}', redirectUrl);
+}
 
 /**
  * Compose a page by injecting content into the layout template
@@ -1145,7 +576,7 @@ app.get('/', async (c) => {
   const html = await composePage(layout, homeHtmlTemplate, {
     title: 'Proton Drive Sync',
     activeTab: 'home',
-    pageScripts: HOME_PAGE_SCRIPTS,
+    pageScripts: homeScripts,
   });
   return c.html(html);
 });
@@ -1162,14 +593,10 @@ app.get('/controls', async (c) => {
     .replace('{{HIDE_CHECK_ICON}}', isOnboarding ? 'hidden' : '')
     .replace('{{HIDE_ARROW_ICON}}', isOnboarding ? '' : 'hidden');
 
-  // Inject redirect URL into scripts
-  const redirectUrl = isOnboarding ? '/about' : '';
-  const scriptsWithRedirect = SETTINGS_PAGE_SCRIPTS.replace('{{REDIRECT_AFTER_SAVE}}', redirectUrl);
-
   const html = await composePage(layout, content, {
     title: 'Controls - Proton Drive Sync',
     activeTab: 'controls',
-    pageScripts: scriptsWithRedirect,
+    pageScripts: controlsScriptsWithRedirect(isOnboarding),
     isOnboarded: !isOnboarding,
   });
   return c.html(html);
@@ -1184,33 +611,10 @@ app.get('/about', async (c) => {
   content = content.replace('{{VERSION}}', pkg.default.version);
   const isOnboarded = hasFlag(FLAGS.ONBOARDED);
   content = content.replace('{{HIDE_START_BUTTON}}', isOnboarded ? 'hidden' : '');
-  const aboutPageScripts = `
-<script>
-  async function startUsing() {
-    const button = document.getElementById('start-using-button');
-    button.disabled = true;
-    button.innerHTML = '<span class="animate-spin">⏳</span> Starting...';
-    
-    try {
-      const response = await fetch('/api/onboard', { method: 'POST' });
-      if (response.ok) {
-        window.location.href = '/';
-      } else {
-        button.disabled = false;
-        button.innerHTML = '<i data-lucide="rocket" class="w-5 h-5"></i> Start Using';
-        lucide.createIcons();
-      }
-    } catch (err) {
-      button.disabled = false;
-      button.innerHTML = '<i data-lucide="rocket" class="w-5 h-5"></i> Start Using';
-      lucide.createIcons();
-    }
-  }
-</script>`;
   const html = await composePage(layout, content, {
     title: 'About - Proton Drive Sync',
     activeTab: 'about',
-    pageScripts: aboutPageScripts,
+    pageScripts: aboutScripts,
     isOnboarded,
   });
   return c.html(html);

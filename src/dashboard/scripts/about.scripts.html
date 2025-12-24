@@ -1,0 +1,22 @@
+<script>
+  async function startUsing() {
+    const button = document.getElementById('start-using-button');
+    button.disabled = true;
+    button.innerHTML = '<span class="animate-spin">&#x23F3;</span> Starting...';
+
+    try {
+      const response = await fetch('/api/onboard', { method: 'POST' });
+      if (response.ok) {
+        window.location.href = '/';
+      } else {
+        button.disabled = false;
+        button.innerHTML = '<i data-lucide="rocket" class="w-5 h-5"></i> Start Using';
+        lucide.createIcons();
+      }
+    } catch (err) {
+      button.disabled = false;
+      button.innerHTML = '<i data-lucide="rocket" class="w-5 h-5"></i> Start Using';
+      lucide.createIcons();
+    }
+  }
+</script>

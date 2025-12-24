@@ -1,0 +1,235 @@
+<script>
+  let syncDirs = [];
+  let originalConfig = null;
+  let serviceEnabled = false;
+  const redirectAfterSave = '{{REDIRECT_AFTER_SAVE}}';
+
+  // Load current config and service status on page load
+  async function loadConfig() {
+    try {
+      const response = await fetch('/api/config');
+      const data = await response.json();
+      const config = data.config;
+      originalConfig = JSON.parse(JSON.stringify(config));
+
+      document.getElementById('sync-concurrency').value = config.sync_concurrency || 8;
+      document.getElementById('concurrency-value').textContent = config.sync_concurrency || 8;
+      syncDirs = config.sync_dirs || [];
+      renderSyncDirs();
+    } catch (err) {
+      console.error('Failed to load config:', err);
+    }
+  }
+
+  async function loadServiceStatus() {
+    try {
+      const response = await fetch('/api/service-status');
+      const data = await response.json();
+      serviceEnabled = data.enabled;
+      updateToggleUI();
+    } catch (err) {
+      console.error('Failed to load service status:', err);
+    }
+  }
+
+  function updateToggleUI() {
+    const toggle = document.getElementById('start-on-login-toggle');
+    const knob = document.getElementById('start-on-login-knob');
+
+    if (serviceEnabled) {
+      toggle.classList.remove('bg-gray-600');
+      toggle.classList.add('bg-proton');
+      toggle.setAttribute('aria-checked', 'true');
+      knob.classList.remove('translate-x-1');
+      knob.classList.add('translate-x-6');
+    } else {
+      toggle.classList.remove('bg-proton');
+      toggle.classList.add('bg-gray-600');
+      toggle.setAttribute('aria-checked', 'false');
+      knob.classList.remove('translate-x-6');
+      knob.classList.add('translate-x-1');
+    }
+  }
+
+  async function toggleStartOnLogin() {
+    const toggle = document.getElementById('start-on-login-toggle');
+    toggle.disabled = true;
+
+    try {
+      const response = await fetch('/api/toggle-service', { method: 'POST' });
+      const data = await response.json();
+
+      if (data.success) {
+        serviceEnabled = data.enabled;
+        updateToggleUI();
+      }
+    } catch (err) {
+      console.error('Failed to toggle service:', err);
+    } finally {
+      toggle.disabled = false;
+    }
+  }
+
+  function renderSyncDirs() {
+    const container = document.getElementById('sync-dirs-list');
+    const noMessage = document.getElementById('no-dirs-message');
+
+    if (syncDirs.length === 0) {
+      container.innerHTML = '';
+      noMessage.classList.remove('hidden');
+      return;
+    }
+
+    noMessage.classList.add('hidden');
+    container.innerHTML = syncDirs
+      .map(
+        (dir, index) => `
+      <div class="flex items-center gap-3 p-4 bg-gray-900 border border-gray-700 rounded-lg group">
+        <div class="flex-1 grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Local Path</label>
+            <input
+              type="text"
+              value="${escapeHtml(dir.source_path)}"
+              onchange="updateSyncDir(${index}, 'source_path', this.value)"
+              placeholder="/path/to/local/directory"
+              class="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-proton"
+            />
+          </div>
+          <div>
+            <div class="flex items-center gap-1 mb-1">
+              <label class="block text-xs text-gray-500">Remote Root</label>
+              <div class="relative group">
+                <i data-lucide="info" class="w-3 h-3 text-gray-500 cursor-help"></i>
+                <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-xs text-gray-300 w-96 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+                  The destination folder in Proton Drive. Must start with / indicating the base of the Proton Drive filesystem.
+                </div>
+              </div>
+            </div>
+            <input
+              type="text"
+              value="${escapeHtml(dir.remote_root || '/')}"
+              onchange="updateSyncDir(${index}, 'remote_root', this.value)"
+              placeholder="/"
+              class="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-proton"
+            />
+          </div>
+        </div>
+        <button
+          onclick="removeSyncDir(${index})"
+          class="p-2 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+          title="Remove directory"
+        >
+          <i data-lucide="trash-2" class="w-5 h-5"></i>
+        </button>
+      </div>
+    `
+      )
+      .join('');
+
+    // Re-initialize Lucide icons for dynamically added content
+    lucide.createIcons();
+  }
+
+  function addSyncDir() {
+    syncDirs.push({ source_path: '', remote_root: '/' });
+    renderSyncDirs();
+  }
+
+  function removeSyncDir(index) {
+    syncDirs.splice(index, 1);
+    renderSyncDirs();
+  }
+
+  function updateSyncDir(index, field, value) {
+    if (field === 'remote_root') {
+      const input = event.target;
+      if (value && !value.startsWith('/')) {
+        input.classList.add('border-red-500');
+        input.setCustomValidity('Remote root must start with /');
+        return;
+      } else {
+        input.classList.remove('border-red-500');
+        input.setCustomValidity('');
+      }
+    }
+    syncDirs[index][field] = value;
+  }
+
+  async function saveConfig() {
+    const saveButton = document.getElementById('save-button');
+
+    // Validate
+    const validDirs = syncDirs.filter((d) => d.source_path.trim());
+    if (validDirs.length === 0) {
+      showToast('At least one sync directory is required', 'error', 5000);
+      return;
+    }
+
+    const config = {
+      sync_concurrency: parseInt(document.getElementById('sync-concurrency').value) || 8,
+      sync_dirs: validDirs.map((d) => ({
+        source_path: d.source_path.trim(),
+        remote_root: d.remote_root?.trim() || '',
+      })),
+    };
+
+    saveButton.disabled = true;
+
+    try {
+      const response = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        showToast('Settings saved successfully!', 'success');
+        // Redirect to about page after successful save only during onboarding
+        if (redirectAfterSave) {
+          window.location.href = redirectAfterSave;
+        } else {
+          originalConfig = JSON.parse(JSON.stringify(config));
+          syncDirs = config.sync_dirs;
+          renderSyncDirs();
+        }
+      } else {
+        showToast(result.error || 'Failed to save settings', 'error', 5000);
+      }
+    } catch (err) {
+      showToast('Error saving settings', 'error', 5000);
+    } finally {
+      saveButton.disabled = false;
+    }
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  async function stopService() {
+    const button = document.getElementById('stop-button');
+    button.disabled = true;
+
+    try {
+      const response = await fetch('/api/signal/stop', { method: 'POST' });
+      if (response.ok) {
+        showToast('Service stopping...', 'info');
+      } else {
+        showToast('Failed to stop service', 'error', 5000);
+        button.disabled = false;
+      }
+    } catch (err) {
+      showToast('Error stopping service', 'error', 5000);
+      button.disabled = false;
+    }
+  }
+
+  // Load config and service status on page load
+  loadConfig();
+  loadServiceStatus();
+</script>
