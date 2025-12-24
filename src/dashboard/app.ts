@@ -46,11 +46,16 @@ import {
 } from './ipc.js';
 import type { Config } from '../config.js';
 
+// Embed HTML templates at compile time as text (required for compiled binaries)
+import layoutHtmlTemplate from './layout.html' with { type: 'text' };
+import homeHtmlTemplate from './home.html' with { type: 'text' };
+import controlsHtmlTemplate from './controls.html' with { type: 'text' };
+import aboutHtmlTemplate from './about.html' with { type: 'text' };
+
 // ============================================================================
 // Constants
 // ============================================================================
 
-const __dirname = import.meta.dir;
 const DASHBOARD_PORT = 4242;
 const LOG_FILE = join(xdgState || '', 'proton-drive-sync', 'sync.log');
 
@@ -1061,14 +1066,9 @@ async function composePage(
     .replace('{{PAGE_SCRIPTS}}', options.pageScripts);
 }
 
-// Cache layout template
-let layoutHtml: string | null = null;
-
-async function getLayout(): Promise<string> {
-  if (!layoutHtml) {
-    layoutHtml = await Bun.file(join(__dirname, 'layout.html')).text();
-  }
-  return layoutHtml;
+// Use embedded layout template
+function getLayout(): string {
+  return layoutHtmlTemplate;
 }
 
 // Serve dashboard HTML at root
@@ -1077,9 +1077,8 @@ app.get('/', async (c) => {
   if (!hasFlag(FLAGS.ONBOARDED)) {
     return c.redirect('/controls');
   }
-  const layout = await getLayout();
-  const content = await Bun.file(join(__dirname, 'home.html')).text();
-  const html = await composePage(layout, content, {
+  const layout = getLayout();
+  const html = await composePage(layout, homeHtmlTemplate, {
     title: 'Proton Drive Sync',
     activeTab: 'home',
     pageScripts: HOME_PAGE_SCRIPTS,
@@ -1089,8 +1088,8 @@ app.get('/', async (c) => {
 
 // Serve controls page
 app.get('/controls', async (c) => {
-  const layout = await getLayout();
-  let content = await Bun.file(join(__dirname, 'controls.html')).text();
+  const layout = getLayout();
+  let content = controlsHtmlTemplate;
   const isOnboarding = !hasFlag(FLAGS.ONBOARDED);
 
   // Replace button text/icons based on onboarding state
@@ -1114,11 +1113,11 @@ app.get('/controls', async (c) => {
 
 // Serve about page
 app.get('/about', async (c) => {
-  const layout = await getLayout();
-  let content = await Bun.file(join(__dirname, 'about.html')).text();
-  // Inject version from package.json
-  const pkg = JSON.parse(await Bun.file(join(__dirname, '../../package.json')).text());
-  content = content.replace('{{VERSION}}', pkg.version);
+  const layout = getLayout();
+  let content = aboutHtmlTemplate;
+  // Inject version from package.json (embedded at build time)
+  const pkg = await import('../../package.json');
+  content = content.replace('{{VERSION}}', pkg.default.version);
   const isOnboarded = hasFlag(FLAGS.ONBOARDED);
   content = content.replace('{{HIDE_START_BUTTON}}', isOnboarded ? 'hidden' : '');
   const aboutPageScripts = `

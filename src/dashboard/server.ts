@@ -6,8 +6,6 @@
  */
 
 import { type Subprocess } from 'bun';
-import { join } from 'path';
-import { watch } from 'fs';
 import { jobEvents, type JobEvent } from '../sync/queue.js';
 import { logger } from '../logger.js';
 import type { Config } from '../config.js';
@@ -37,8 +35,6 @@ export type {
 // ============================================================================
 // Constants
 // ============================================================================
-
-const __dirname = import.meta.dir;
 
 // Accumulate diffs for this interval before sending to child
 const DIFF_ACCUMULATE_MS = 100;
@@ -112,11 +108,7 @@ let dashboardProcess: DashboardSubprocess | null = null;
 let jobEventHandler: ((event: JobEvent) => void) | null = null;
 let accumulatedDiff: DashboardDiff = createEmptyDiff();
 let diffTimeout: ReturnType<typeof setTimeout> | null = null;
-let fileWatcher: ReturnType<typeof watch> | null = null;
-let isRestarting = false;
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
-let currentConfig: Config | null = null;
-let currentDryRun = false;
 let currentAuthStatus: AuthStatusUpdate = { status: 'unauthenticated' };
 let lastSentStatus: DashboardStatus | null = null;
 let lastSyncHeartbeat: number = 0;
@@ -165,9 +157,7 @@ async function readChildMessages(stdout: ReadableStream<Uint8Array>): Promise<vo
         if (!msg) continue;
 
         if (msg.type === 'ready') {
-          const isDevMode = Bun.env.PROTON_DEV === '1';
-          const hotReloadMsg = isDevMode ? ' (hot reload enabled)' : '';
-          logger.info(`Dashboard running at http://localhost:${msg.port}${hotReloadMsg}`);
+          logger.info(`Dashboard running at http://localhost:${msg.port}`);
 
           // Send initial status when dashboard is ready
           sendStatusToDashboard();
@@ -203,35 +193,28 @@ export function startDashboard(config: Config, dryRun = false): void {
     return;
   }
 
-  // Store config for potential restarts
-  currentConfig = config;
-  currentDryRun = dryRun;
-
   logger.debug(`Dashboard starting with dryRun=${dryRun}`);
 
-  // Determine if we're running in dev mode (set by Makefile)
-  const isDevMode = Bun.env.PROTON_DEV === '1';
+  // Use the binary name - PATH resolution will find it
+  dashboardProcess = Bun.spawn(['proton-drive-sync', 'start', '--dashboard'], {
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'inherit',
+    env: { ...process.env },
+  });
 
-  // Spawn the dashboard subprocess
-  // Both dev and prod use the same mechanism: 'start --dashboard'
-  // In dev mode, we run via bun with the source file
-  // In production (compiled binary), we run the same binary
-  if (isDevMode) {
-    const indexPath = join(__dirname, '..', 'index.ts');
-    dashboardProcess = Bun.spawn(['bun', indexPath, 'start', '--dashboard'], {
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'inherit',
-    });
-  } else {
-    // In production, spawn the same binary with 'start --dashboard'
-    // This works with Bun's single-file executable
-    dashboardProcess = Bun.spawn([process.execPath, 'start', '--dashboard'], {
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'inherit',
-    });
-  }
+  // Set up SIGTERM handler to clean up dashboard child on parent exit
+  // This ensures clean restarts when using bun --watch
+  process.on('SIGTERM', () => {
+    if (dashboardProcess) {
+      dashboardProcess.kill();
+    }
+  });
+  process.on('SIGINT', () => {
+    if (dashboardProcess) {
+      dashboardProcess.kill();
+    }
+  });
 
   // Read messages from child stdout
   if (dashboardProcess.stdout) {
@@ -272,11 +255,6 @@ export function startDashboard(config: Config, dryRun = false): void {
     }
   };
   jobEvents.on('job', jobEventHandler);
-
-  // Watch for source file changes in development
-  if (isDevMode) {
-    setupHotReload();
-  }
 }
 
 /**
@@ -287,11 +265,6 @@ export async function stopDashboard(): Promise<void> {
   if (heartbeatInterval) {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
-  }
-
-  if (fileWatcher) {
-    fileWatcher.close();
-    fileWatcher = null;
   }
 
   if (dashboardProcess) {
@@ -309,104 +282,6 @@ export async function stopDashboard(): Promise<void> {
     await proc.exited;
 
     logger.debug('Dashboard process stopped');
-  }
-}
-
-/**
- * Set up hot reload for dashboard in development mode.
- * Watches the dashboard source directory and restarts the subprocess on changes.
- */
-function setupHotReload(): void {
-  // Only set up once - don't create multiple watchers
-  if (fileWatcher) {
-    return;
-  }
-
-  // When running with tsx, __dirname is src/dashboard, otherwise dist/dashboard
-  // We want to watch the source directory for changes
-  const dashboardDir = __dirname.includes('dist')
-    ? __dirname.replace('/dist/', '/src/')
-    : __dirname;
-
-  logger.info(`Dashboard hot reload enabled, watching ${dashboardDir}`);
-
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-  fileWatcher = watch(dashboardDir, { recursive: true }, (_eventType, filename) => {
-    if (
-      !filename ||
-      (!filename.endsWith('.ts') && !filename.endsWith('.tsx') && !filename.endsWith('.html'))
-    ) {
-      return;
-    }
-
-    // Debounce rapid changes
-    if (debounceTimer) {
-      clearTimeout(debounceTimer);
-    }
-
-    debounceTimer = setTimeout(() => {
-      debounceTimer = null;
-      logger.info(`Dashboard source changed (${filename}), restarting...`);
-      restartDashboard();
-    }, 500);
-  });
-}
-
-/**
- * Restart the dashboard subprocess (used for hot reload).
- * Waits for the old process to exit before spawning a new one.
- */
-async function restartDashboard(): Promise<void> {
-  if (!currentConfig) return;
-
-  // Prevent concurrent restarts
-  if (isRestarting) {
-    logger.debug('Dashboard restart already in progress, skipping');
-    return;
-  }
-
-  isRestarting = true;
-
-  try {
-    // Stop heartbeat
-    if (heartbeatInterval) {
-      clearInterval(heartbeatInterval);
-      heartbeatInterval = null;
-    }
-
-    // Reset last sent status so initial status is sent on restart
-    lastSentStatus = null;
-
-    // Stop current process and wait for it to exit
-    if (dashboardProcess) {
-      if (jobEventHandler) {
-        jobEvents.off('job', jobEventHandler);
-        jobEventHandler = null;
-      }
-
-      const proc = dashboardProcess;
-      dashboardProcess = null;
-
-      // Kill and wait with timeout
-      proc.kill();
-      const timeout = setTimeout(() => {
-        logger.warn('Dashboard process did not exit gracefully during restart');
-      }, 2000);
-      await proc.exited;
-      clearTimeout(timeout);
-    }
-
-    // Now safe to restart
-    if (currentConfig) {
-      // Temporarily clear fileWatcher to avoid re-setting up
-      const savedWatcher = fileWatcher;
-      fileWatcher = null;
-      startDashboard(currentConfig, currentDryRun);
-      fileWatcher = savedWatcher;
-    }
-  } finally {
-    isRestarting = false;
   }
 }
 

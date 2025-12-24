@@ -5,7 +5,7 @@
  */
 
 import { loadConfig, watchConfig } from '../config.js';
-import { logger, enableDebug, disableConsoleLogging, setDryRun } from '../logger.js';
+import { logger, enableDebug, setDryRun } from '../logger.js';
 import { startSignalListener, stopSignalListener, registerSignalHandler } from '../signals.js';
 import { acquireRunLock, releaseRunLock } from '../flags.js';
 import { getStoredCredentials, createClientFromTokens, type ProtonDriveClient } from './auth.js';
@@ -18,8 +18,8 @@ import { runOneShotSync, runWatchMode } from '../sync/index.js';
 // ============================================================================
 
 interface StartOptions {
-  noDaemon?: boolean;
-  noWatch?: boolean;
+  daemon?: boolean; // Commander's --no-daemon sets this to false
+  watch?: boolean; // Commander's --no-watch sets this to false
   dryRun?: boolean;
   debug?: number;
   dashboard?: boolean;
@@ -89,28 +89,18 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
  * The child process runs with --no-daemon to execute the actual sync.
  */
 function spawnDaemon(options: StartOptions): void {
-  // Use process.execPath (bun) and process.argv[1] (script) to handle both:
-  // - Development: bun src/index.ts -> execPath=bun, argv[1]=src/index.ts
-  // - Production: ./dist/proton-drive-sync -> execPath=binary, argv[1]=binary
-  const execPath = process.execPath;
-  const scriptPath = process.argv[1];
-  const isBunRunningScript = execPath.endsWith('bun') && scriptPath !== execPath;
-
-  const cmd = isBunRunningScript ? execPath : scriptPath;
-  const args = isBunRunningScript ? [scriptPath, 'start', '--no-daemon'] : ['start', '--no-daemon'];
+  const args = ['start', '--no-daemon'];
 
   // Forward relevant flags to the daemon process
-  if (options.noWatch) args.push('--no-watch');
+  if (options.watch === false) args.push('--no-watch');
   if (options.dryRun) args.push('--dry-run');
   if (options.debug) args.push('--debug', String(options.debug));
 
-  // Forward environment variables needed for daemon
-  const env = { ...process.env };
-
-  const child = Bun.spawn([cmd, ...args], {
+  // Use the binary name - PATH resolution will find it
+  const child = Bun.spawn(['proton-drive-sync', ...args], {
     detached: true,
     stdio: ['ignore', 'ignore', 'ignore'],
-    env,
+    env: { ...process.env },
   });
 
   // Unref so parent can exit without waiting for child
@@ -131,16 +121,18 @@ export async function startCommand(options: StartOptions): Promise<void> {
   }
 
   // Derive effective modes from flags
-  const watch = !options.noWatch;
+  // Commander's --no-watch sets watch=false, default is true
+  const watchMode = options.watch !== false;
 
   // Validate: --no-watch requires --no-daemon
-  if (options.noWatch && !options.noDaemon) {
+  if (options.watch === false && options.daemon !== false) {
     console.error('Error: --no-watch requires --no-daemon');
     process.exit(1);
   }
 
   // Daemonize: spawn background process and exit
-  if (!options.noDaemon) {
+  // Commander's --no-daemon sets daemon=false, default is true
+  if (options.daemon !== false) {
     spawnDaemon(options);
     return;
   }
@@ -210,7 +202,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
 
   // Start dashboard early (before auth) so user can see auth status
   const dryRun = options.dryRun ?? false;
-  if (watch) {
+  if (watchMode) {
     startDashboard(config, dryRun);
   }
 
@@ -226,7 +218,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
   }
 
   try {
-    if (watch) {
+    if (watchMode) {
       // Watch mode: continuous sync
       await runWatchMode({ config, client, dryRun, watch: true });
     } else {

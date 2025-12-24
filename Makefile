@@ -14,11 +14,22 @@ build-check:
 
 # Run directly with bun (one-off commands)
 run:
-	PATH="$(PWD)/dist:$(PATH)" PROTON_DEV=1 bun src/index.ts $(ARGS)
+	PATH="$(PWD)/dist:$(PATH)" bun src/index.ts $(ARGS)
 
 # Run directly with bun in watch mode (auto-reload on file changes)
+# Uses watchman to watch all src/ files including HTML, rebuilds and restarts
 dev:
-	PATH="$(PWD)/dist:$(PATH)" PROTON_DEV=1 bun --watch src/index.ts start --no-daemon
+	@echo "Starting dev mode with watchman file watching..."
+	@make build
+	@while true; do \
+		PATH="$(PWD)/dist:$$PATH" proton-drive-sync start --no-daemon & \
+		PID=$$!; \
+		watchman-wait . -m 1 -p 'src/**/*.ts' -p 'src/**/*.html'; \
+		echo "File changed, rebuilding..."; \
+		kill $$PID 2>/dev/null; \
+		wait $$PID 2>/dev/null; \
+		make build; \
+	done
 
 # Run pre-commit checks on all files
 pre-commit:
