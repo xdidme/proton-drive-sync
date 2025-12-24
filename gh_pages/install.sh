@@ -246,18 +246,38 @@ if [[ "$no_modify_path" != "true" ]]; then
     fi
 fi
 
-if [ -n "${GITHUB_ACTIONS-}" ] && [ "${GITHUB_ACTIONS}" == "true" ]; then
-    echo "$INSTALL_DIR" >> "$GITHUB_PATH"
-    print_message info "Added $INSTALL_DIR to \$GITHUB_PATH"
+# Add INSTALL_DIR to PATH for the rest of the script
+export PATH="$INSTALL_DIR:$PATH"
+
+# Verify proton-drive-sync is found
+if ! command -v proton-drive-sync >/dev/null 2>&1; then
+    echo -e "${RED}Error: proton-drive-sync not found in PATH after installation${NC}"
+    exit 1
 fi
 
 echo -e ""
 echo -e "${MUTED}Proton Drive Sync${NC} installed successfully!"
 echo -e ""
-echo -e "${MUTED}To get started:${NC}"
+
+# Run auth flow
+echo -e "${MUTED}Starting authentication...${NC}"
 echo -e ""
-echo -e "  proton-drive-sync auth     ${MUTED}# Authenticate with Proton${NC}"
-echo -e "  proton-drive-sync start    ${MUTED}# Start syncing${NC}"
+if ! proton-drive-sync auth; then
+    echo -e ""
+    echo -e "${RED}Authentication failed or was cancelled.${NC}"
+    echo -e "${MUTED}Run the install command again to retry.${NC}"
+    exit 1
+fi
+
+# Start the daemon
 echo -e ""
-echo -e "${MUTED}For more information:${NC} https://github.com/$REPO"
+echo -e "${MUTED}Starting proton-drive-sync daemon...${NC}"
+proton-drive-sync start
+
+echo -e ""
+echo -e "${MUTED}Proton Drive Sync is now running!${NC}"
+echo -e ""
+echo -e "${MUTED}Complete your configuration by visiting the dashboard at:${NC}"
+echo -e ""
+echo -e "  http://localhost:4242"
 echo -e ""

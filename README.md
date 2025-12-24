@@ -3,7 +3,7 @@
 Automatically syncs selected local folders to Proton Drive in the background, with a dashboard for monitoring.
 
 <p align="center">
-  <img src="readme_assets/home.png" alt="Dashboard" width="500">
+  <img src="readme_assets/home.png" alt="Dashboard" width="600">
 </p>
 
 ## Getting Started
@@ -34,6 +34,12 @@ The dashboard runs locally at http://localhost:4242. Use it to configure and man
 3. If you would like to stop the sync client: `proton-drive-sync stop`
 
 4. For more advanced commands, see: `proton-drive-sync --help`
+
+### Uninstall
+
+```bash
+curl -fsSL https://www.damianb.dev/proton-drive-sync/uninstall.sh | bash
+```
 
 ## Development
 
