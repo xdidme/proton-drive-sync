@@ -63,7 +63,7 @@
     </div>
 
     <!-- Start Using Link (only shown during onboarding) -->
-    <div id="start-using-container" class="{{HIDE_START_BUTTON}} mb-8">
+    <div id="start-using-container" class="{{HIDE_START_BUTTON}} mt-2 mb-4">
       <a
         href="#"
         onclick="
@@ -71,9 +71,10 @@
           return false;
         "
         id="start-using-button"
-        class="text-gray-400 hover:text-gray-300 text-sm transition-colors"
+        class="flex items-center text-gray-400 hover:text-gray-300 text-sm transition-colors px-4 py-2 border border-gray-600 rounded-full hover:border-gray-500"
       >
-        Skip → Start using
+        Start using
+        <i data-lucide="rocket" class="w-4 h-4 ml-1"></i>
       </a>
     </div>
 
