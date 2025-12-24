@@ -29,6 +29,7 @@ import {
 import { FLAGS, setFlag, clearFlag, hasFlag } from '../flags.js';
 import { sendSignal } from '../signals.js';
 import { CONFIG_FILE, CONFIG_CHECK_SIGNAL } from '../config.js';
+import { isServiceInstalled, loadSyncService, unloadSyncService } from '../cli/service.js';
 import type {
   DashboardDiff,
   AuthStatusUpdate,
@@ -664,9 +665,10 @@ const SETTINGS_PAGE_SCRIPTS = `
 <script>
   let syncDirs = [];
   let originalConfig = null;
+  let serviceEnabled = false;
   const redirectAfterSave = '{{REDIRECT_AFTER_SAVE}}';
 
-  // Load current config on page load
+  // Load current config and service status on page load
   async function loadConfig() {
     try {
       const response = await fetch('/api/config');
@@ -680,6 +682,60 @@ const SETTINGS_PAGE_SCRIPTS = `
       renderSyncDirs();
     } catch (err) {
       console.error('Failed to load config:', err);
+    }
+  }
+
+  async function loadServiceStatus() {
+    try {
+      const response = await fetch('/api/service-status');
+      const data = await response.json();
+      const section = document.getElementById('start-on-login-section');
+      
+      if (data.installed) {
+        section.classList.remove('hidden');
+        serviceEnabled = data.enabled;
+        updateToggleUI();
+      }
+    } catch (err) {
+      console.error('Failed to load service status:', err);
+    }
+  }
+
+  function updateToggleUI() {
+    const toggle = document.getElementById('start-on-login-toggle');
+    const knob = document.getElementById('start-on-login-knob');
+    
+    if (serviceEnabled) {
+      toggle.classList.remove('bg-gray-600');
+      toggle.classList.add('bg-proton');
+      toggle.setAttribute('aria-checked', 'true');
+      knob.classList.remove('translate-x-1');
+      knob.classList.add('translate-x-6');
+    } else {
+      toggle.classList.remove('bg-proton');
+      toggle.classList.add('bg-gray-600');
+      toggle.setAttribute('aria-checked', 'false');
+      knob.classList.remove('translate-x-6');
+      knob.classList.add('translate-x-1');
+    }
+  }
+
+  async function toggleStartOnLogin() {
+    const toggle = document.getElementById('start-on-login-toggle');
+    toggle.disabled = true;
+    
+    try {
+      const response = await fetch('/api/toggle-service', { method: 'POST' });
+      const data = await response.json();
+      
+      if (data.success) {
+        serviceEnabled = data.enabled;
+        updateToggleUI();
+      }
+    } catch (err) {
+      console.error('Failed to toggle service:', err);
+    } finally {
+      toggle.disabled = false;
     }
   }
 
@@ -834,8 +890,9 @@ const SETTINGS_PAGE_SCRIPTS = `
     return div.innerHTML;
   }
 
-  // Load config on page load
+  // Load config and service status on page load
   loadConfig();
+  loadServiceStatus();
 </script>`;
 
 /**
@@ -1062,6 +1119,29 @@ app.get('/api/fragments/syncing-status', (c) => {
 app.post('/api/onboard', (c) => {
   setFlag(FLAGS.ONBOARDED);
   return c.json({ success: true });
+});
+
+/** Get service start-on-login status */
+app.get('/api/service-status', (c) => {
+  const installed = isServiceInstalled();
+  const enabled = hasFlag(FLAGS.SERVICE_LOADED);
+  return c.json({ installed, enabled });
+});
+
+/** Toggle service start-on-login */
+app.post('/api/toggle-service', (c) => {
+  if (!isServiceInstalled()) {
+    return c.json({ error: 'Service not installed' }, 400);
+  }
+
+  const isEnabled = hasFlag(FLAGS.SERVICE_LOADED);
+  if (isEnabled) {
+    unloadSyncService();
+    return c.json({ success: true, enabled: false });
+  } else {
+    const success = loadSyncService();
+    return c.json({ success, enabled: success });
+  }
 });
 
 /** Toggle pause state */

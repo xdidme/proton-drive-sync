@@ -8,6 +8,11 @@ import { join } from 'path';
 import { homedir } from 'os';
 import * as readline from 'readline';
 import { sendSignal } from '../signals.js';
+import { setFlag, clearFlag, FLAGS } from '../flags.js';
+// @ts-expect-error Bun text imports
+import watchmanPlistTemplate from './templates/watchman.plist' with { type: 'text' };
+// @ts-expect-error Bun text imports
+import syncPlistTemplate from './templates/proton-drive-sync.plist' with { type: 'text' };
 
 function askYesNo(question: string): Promise<boolean> {
   const rl = readline.createInterface({
@@ -52,66 +57,17 @@ function getBinPath(): string {
 }
 
 function generateWatchmanPlist(watchmanPath: string): string {
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
- "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-  <dict>
-    <key>Label</key>
-    <string>${WATCHMAN_SERVICE_NAME}</string>
-
-    <key>ProgramArguments</key>
-    <array>
-      <string>${watchmanPath}</string>
-      <string>--foreground</string>
-    </array>
-
-    <key>RunAtLoad</key>
-    <true/>
-
-    <key>KeepAlive</key>
-    <true/>
-  </dict>
-</plist>
-`;
+  return watchmanPlistTemplate
+    .replace('{{SERVICE_NAME}}', WATCHMAN_SERVICE_NAME)
+    .replace('{{WATCHMAN_PATH}}', watchmanPath);
 }
 
 function generateSyncPlist(binPath: string): string {
   const home = homedir();
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>${SERVICE_NAME}</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>${binPath}</string>
-        <string>start</string>
-        <string>--watch</string>
-        <string>--daemon</string>
-    </array>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>HOME</key>
-        <string>${home}</string>
-        <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
-    </dict>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-    </dict>
-    <key>StandardOutPath</key>
-    <string>${home}/Library/Logs/proton-drive-sync.out.log</string>
-    <key>StandardErrorPath</key>
-    <string>${home}/Library/Logs/proton-drive-sync.err.log</string>
-</dict>
-</plist>
-`;
+  return syncPlistTemplate
+    .replace('{{SERVICE_NAME}}', SERVICE_NAME)
+    .replace('{{BIN_PATH}}', binPath)
+    .replace(/\{\{HOME\}\}/g, home);
 }
 
 function loadService(name: string, plistPath: string): void {
@@ -235,24 +191,62 @@ export async function serviceUninstallCommand(): Promise<void> {
   }
 }
 
+/**
+ * Check if the service plist file exists (i.e., service is installed)
+ */
+export function isServiceInstalled(): boolean {
+  return existsSync(PLIST_PATH);
+}
+
+/**
+ * Load the sync service (enable start on login)
+ * Returns true on success, false on failure
+ */
+export function loadSyncService(): boolean {
+  if (process.platform !== 'darwin') {
+    return false;
+  }
+
+  if (!existsSync(PLIST_PATH)) {
+    return false;
+  }
+
+  try {
+    loadService(SERVICE_NAME, PLIST_PATH);
+    setFlag(FLAGS.SERVICE_LOADED);
+    console.info('Service loaded: will start on login');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Unload the sync service (disable start on login)
+ * Returns true on success, false on failure
+ */
+export function unloadSyncService(): boolean {
+  if (process.platform !== 'darwin') {
+    return false;
+  }
+
+  if (existsSync(PLIST_PATH)) {
+    unloadService(SERVICE_NAME, PLIST_PATH);
+  }
+
+  clearFlag(FLAGS.SERVICE_LOADED);
+  console.info('Service unloaded: will not start on login');
+  return true;
+}
+
 export function serviceUnloadCommand(): void {
   if (process.platform !== 'darwin') {
     console.error('Error: Service stop is only supported on macOS.');
     process.exit(1);
   }
 
-  // Unload the service to stop it and prevent restart
-  if (existsSync(PLIST_PATH)) {
-    try {
-      execSync(`launchctl unload "${PLIST_PATH}"`, { stdio: 'ignore' });
-    } catch {
-      // Ignore if not loaded
-    }
-  }
-
-  // Send stop signal to any running process
+  unloadSyncService();
   sendSignal('stop');
-
   console.log('Service stopped and unloaded. Run `proton-drive-sync service start` to restart.');
 }
 
@@ -267,10 +261,9 @@ export function serviceLoadCommand(): void {
     process.exit(1);
   }
 
-  try {
-    execSync(`launchctl load "${PLIST_PATH}"`, { stdio: 'ignore' });
+  if (loadSyncService()) {
     console.log('Service started.');
-  } catch {
+  } else {
     console.error('Failed to start service.');
     process.exit(1);
   }

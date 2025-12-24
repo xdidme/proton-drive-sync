@@ -12,6 +12,7 @@ export const FLAGS = {
   RUNNING: 'running',
   PAUSED: 'paused',
   ONBOARDED: 'onboarded',
+  SERVICE_LOADED: 'service_loaded',
 } as const;
 
 /**
