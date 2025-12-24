@@ -4,10 +4,13 @@
 
 - `make install` - install dependencies (requires watchman installed on system)
 - `make build` - compile standalone binary to dist/proton-drive-sync
-- `make dev ARGS="start --watch"` - run with bun in watch mode (auto-reload)
+- `make run ARGS="<cmd>"` - run one-off command (e.g., `make run ARGS="status"`)
+- `make dev ARGS="start"` - run with auto-reload on file changes
 - `make pre-commit` - run eslint --fix and prettier on all files
-- `make db-inspect` - open Drizzle Studio to inspect SQLite database
 - `make build-check` - type-check without emitting files
+- `make db-inspect` - open Drizzle Studio to inspect SQLite database
+- `make clean` - remove dist/ build artifacts
+- No test suite exists in this project
 
 ## Code Style
 
@@ -17,3 +20,4 @@
 - **Naming**: camelCase for functions/variables, PascalCase for types/interfaces
 - **Exports**: Named exports preferred; re-export from index.ts barrel files
 - **Logging**: Use winston logger (`import { logger } from './logger.js'`)
+- **Errors**: Throw Error objects; no custom error classes used
