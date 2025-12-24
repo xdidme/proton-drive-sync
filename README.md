@@ -11,7 +11,7 @@ A CLI tool that watches local directories and syncs changes to Proton Drive in r
 ### Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/damianb-bitflipper/proton-drive-sync/main/install | bash
+curl -fsSL https://damianb-bitflipper.github.io/proton-drive-sync/install | bash
 ```
 
 ### Authentication
