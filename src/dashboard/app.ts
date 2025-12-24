@@ -52,6 +52,19 @@ import homeHtmlTemplate from './home.html' with { type: 'text' };
 import controlsHtmlTemplate from './controls.html' with { type: 'text' };
 import aboutHtmlTemplate from './about.html' with { type: 'text' };
 
+// Embed assets at compile time (required for compiled binaries)
+import iconSvg from './assets/icon.svg' with { type: 'text' };
+import githubSvg from './assets/github.svg' with { type: 'text' };
+import xLogoSvg from './assets/x-logo.svg' with { type: 'text' };
+import damianJpgPath from './assets/damian.jpg' with { type: 'file' };
+
+// Asset map for serving embedded assets
+const embeddedAssets: Record<string, { content: string; type: string }> = {
+  'icon.svg': { content: iconSvg, type: 'image/svg+xml' },
+  'github.svg': { content: githubSvg, type: 'image/svg+xml' },
+  'x-logo.svg': { content: xLogoSvg, type: 'image/svg+xml' },
+};
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -1152,20 +1165,30 @@ app.get('/about', async (c) => {
   return c.html(html);
 });
 
-// Serve static assets
+// Serve static assets from embedded imports
 app.get('/assets/:filename', async (c) => {
   const filename = c.req.param('filename');
-  const filePath = join(__dirname, 'assets', filename);
-  try {
-    const file = Bun.file(filePath);
-    const content = await file.arrayBuffer();
-    const ext = filename.split('.').pop();
-    const contentType =
-      ext === 'svg' ? 'image/svg+xml' : ext === 'png' ? 'image/png' : 'application/octet-stream';
-    return c.body(content, 200, { 'Content-Type': contentType });
-  } catch {
-    return c.notFound();
+
+  // Check embedded text assets first (SVGs)
+  if (filename in embeddedAssets) {
+    const asset = embeddedAssets[filename];
+    return c.body(asset.content, 200, { 'Content-Type': asset.type });
   }
+
+  // Handle damian.jpg using the embedded file path
+  if (filename === 'damian.jpg') {
+    const file = Bun.file(damianJpgPath);
+    return new Response(file, {
+      headers: { 'Content-Type': 'image/jpeg' },
+    });
+  }
+
+  return c.notFound();
+});
+
+// Serve favicon at root for browsers that request /favicon.ico
+app.get('/favicon.ico', (c) => {
+  return c.body(embeddedAssets['icon.svg'].content, 200, { 'Content-Type': 'image/svg+xml' });
 });
 
 // ============================================================================
