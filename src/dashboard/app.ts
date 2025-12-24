@@ -1466,22 +1466,21 @@ server.on('listening', () => {
   safeSend({ type: 'ready', port: DASHBOARD_PORT });
 });
 
+// Graceful shutdown helper - exit immediately
+// SSE connections keep the server alive, so we can't wait for server.close()
+function shutdown() {
+  process.exit(0);
+}
+
 // Exit if parent process dies (IPC channel closes)
-process.on('disconnect', () => {
-  server.close(() => process.exit(0));
-});
+process.on('disconnect', shutdown);
 
 // Handle EPIPE errors from IPC when parent exits unexpectedly
 process.on('error', (err) => {
   console.error('Dashboard process error:', err);
-  server.close(() => process.exit(0));
+  shutdown();
 });
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
-  server.close(() => process.exit(0));
-});
-
-process.on('SIGINT', () => {
-  server.close(() => process.exit(0));
-});
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
