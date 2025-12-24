@@ -81,7 +81,7 @@ export interface ErrorClassification {
 
 const MAX_RETRIES: Record<ErrorCategory, number> = {
   [ErrorCategory.OTHER]: RETRY_DELAYS_SEC.length,
-  [ErrorCategory.REUPLOAD_NEEDED]: 1,
+  [ErrorCategory.REUPLOAD_NEEDED]: 2,
   [ErrorCategory.NETWORK]: Infinity,
 };
 
@@ -450,7 +450,7 @@ export function scheduleRetry(
 
   if (errorCategory === ErrorCategory.REUPLOAD_NEEDED) {
     delaySec = REUPLOAD_NEEDED_RETRY_SEC;
-    newRetries = nRetries;
+    newRetries = nRetries + 1;
   } else if (errorCategory === ErrorCategory.NETWORK) {
     const effectiveRetries = Math.min(nRetries, NETWORK_RETRY_CAP_INDEX);
     const delayIndex = Math.min(effectiveRetries, RETRY_DELAYS_SEC.length - 1);
