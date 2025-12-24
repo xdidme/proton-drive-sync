@@ -17,9 +17,9 @@ import { runOneShotSync, runWatchMode } from '../sync/index.js';
 // ============================================================================
 
 interface StartOptions {
-  watch?: boolean;
+  noDaemon?: boolean;
+  noWatch?: boolean;
   dryRun?: boolean;
-  daemon?: boolean;
   debug?: number;
 }
 
@@ -79,17 +79,6 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
 }
 
 // ============================================================================
-// Types
-// ============================================================================
-
-interface StartOptions {
-  watch?: boolean;
-  dryRun?: boolean;
-  daemon?: boolean;
-  debug?: number;
-}
-
-// ============================================================================
 // CLI Command
 // ============================================================================
 
@@ -97,9 +86,14 @@ interface StartOptions {
  * Main entry point for the sync command.
  */
 export async function startCommand(options: StartOptions): Promise<void> {
-  // Validate: --daemon requires --watch
-  if (options.daemon && !options.watch) {
-    console.error('Error: --daemon (-d) requires --watch (-w)');
+  // Derive effective modes from flags
+  // Default (no flags): daemon mode with watch (like old --daemon --watch)
+  const watch = !options.noWatch;
+  const daemon = !options.noDaemon;
+
+  // Validate: --no-watch requires --no-daemon
+  if (options.noWatch && !options.noDaemon) {
+    console.error('Error: --no-watch requires --no-daemon');
     process.exit(1);
   }
 
@@ -113,7 +107,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
   }
 
   // Handle daemon mode (disable console logging)
-  if (options.daemon) {
+  if (daemon) {
     disableConsoleLogging();
   }
 
@@ -171,7 +165,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
 
   // Start dashboard early (before auth) so user can see auth status
   const dryRun = options.dryRun ?? false;
-  if (options.watch) {
+  if (watch) {
     startDashboard(config, dryRun);
   }
 
@@ -187,7 +181,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
   }
 
   try {
-    if (options.watch) {
+    if (watch) {
       // Watch mode: continuous sync
       await runWatchMode({ config, client, dryRun, watch: true });
     } else {

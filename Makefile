@@ -18,7 +18,7 @@ run:
 
 # Run directly with bun in watch mode (auto-reload on file changes)
 dev:
-	PATH="$(PWD)/dist:$(PATH)" PROTON_DEV=1 bun --watch src/index.ts start --watch
+	PATH="$(PWD)/dist:$(PATH)" PROTON_DEV=1 bun --watch src/index.ts start --no-daemon
 
 # Run pre-commit checks on all files
 pre-commit:

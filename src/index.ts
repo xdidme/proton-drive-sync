@@ -40,8 +40,8 @@ program
   .command('start')
   .description('Start syncing changes to Proton Drive')
   .option('-n, --dry-run', 'Show what would be synced without making changes')
-  .option('-w, --watch', 'Keep running and watch for changes')
-  .option('-d, --daemon', 'Run as daemon (requires --watch, enables stop signal handling)')
+  .option('--no-daemon', 'Run in foreground instead of as daemon')
+  .option('--no-watch', 'Sync once and exit (requires --no-daemon)')
   .option(
     '--debug',
     'Enable debug logging (use twice for SDK debug)',

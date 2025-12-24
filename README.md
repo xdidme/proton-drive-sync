@@ -29,7 +29,7 @@ The dashboard runs locally at http://localhost:4242. Use it to configure and man
 
 1. If you need to reauthenticate: `proton-drive-sync auth`
 
-2. If you would like to start the sync client (as a daemon): `proton-drive-sync start --watch --daemon`
+2. If you would like to start the sync client (as a daemon): `proton-drive-sync start`
 
 3. If you would like to stop the sync client: `proton-drive-sync stop`
 

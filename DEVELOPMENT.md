@@ -16,7 +16,7 @@ The canonical way to develop is via the `make dev` command, which runs the app d
 make dev
 ```
 
-This runs `start --watch` automatically. Use `Ctrl+C` to stop.
+This runs `start --no-daemon` automatically. Use `Ctrl+C` to stop.
 
 For one-off commands (like service install), use `make run`:
 
@@ -30,7 +30,7 @@ make run ARGS="service install"
 | ----------------- | ------------------------------------------------- |
 | `make install`    | Install dependencies                              |
 | `make build`      | Build standalone binary to `./dist`               |
-| `make dev`        | Run `start --watch` with bun (auto-reload)        |
+| `make dev`        | Run `start --no-daemon` with bun (auto-reload)    |
 | `make run ARGS=…` | Run one-off commands with bun (exits on complete) |
 | `make pre-commit` | Run lint and format on all files                  |
 | `make clean`      | Remove build artifacts                            |
