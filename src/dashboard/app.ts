@@ -447,17 +447,45 @@ function renderAuthStatus(auth: AuthStatusUpdate): string {
 
   // Set authenticated label only when status is authenticated (to safely access username)
   if (auth.status === 'authenticated') {
-    const label = auth.username
-      ? `Authenticated as: ${escapeHtml(auth.username)}`
-      : 'Authenticated';
+    const label = auth.username ? `${auth.username}@proton.me` : auth.email || 'Logged in';
     statusConfig.authenticated.label = label;
   }
 
-  const config = statusConfig[auth.status];
+  const config = statusConfig[auth.status] || statusConfig.unauthenticated;
   return `
-<div class="h-9 flex items-center gap-2 px-3 rounded-full bg-gray-900 border border-gray-700 transition-colors duration-300 ${config.border}">
+<div class="flex items-center gap-2 px-3 py-1.5 rounded-full border ${config.border}">
   ${config.icon}
   <span class="text-xs font-medium ${config.text}">${config.label}</span>
+</div>`;
+}
+
+/** Render stop section HTML - returns empty string when disconnected */
+function renderStopSection(syncStatus: string): string {
+  if (syncStatus === 'disconnected') return '';
+
+  return `
+<div class="bg-gray-800 rounded-xl border border-gray-700 p-6">
+  <div class="flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <h3 class="text-lg font-semibold text-white">Stop Proton Drive Sync</h3>
+      <div class="relative group">
+        <svg class="w-4 h-4 text-gray-500 cursor-help" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <div class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-xs text-gray-300 w-96 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10">
+          You can start it again with <code class="bg-gray-800 px-1 py-0.5 rounded font-mono">proton-drive-sync start</code>
+        </div>
+      </div>
+    </div>
+    <button
+      onclick="stopService()"
+      id="stop-button"
+      class="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors"
+    >
+      <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1" /></svg>
+      Stop
+    </button>
+  </div>
 </div>`;
 }
 
@@ -954,6 +982,24 @@ const SETTINGS_PAGE_SCRIPTS = `
     return div.innerHTML;
   }
 
+  async function stopService() {
+    const button = document.getElementById('stop-button');
+    button.disabled = true;
+
+    try {
+      const response = await fetch('/api/signal/stop', { method: 'POST' });
+      if (response.ok) {
+        showToast('Service stopping...', 'info');
+      } else {
+        showToast('Failed to stop service', 'error', 5000);
+        button.disabled = false;
+      }
+    } catch (err) {
+      showToast('Error stopping service', 'error', 5000);
+      button.disabled = false;
+    }
+  }
+
   // Load config and service status on page load
   loadConfig();
   loadServiceStatus();
@@ -1112,6 +1158,10 @@ app.get('/api/fragments/stats', (c) => {
   return c.html(renderStats(getJobCounts()));
 });
 
+app.get('/api/fragments/stop-section', (c) => {
+  return c.html(renderStopSection(currentSyncStatus));
+});
+
 app.get('/api/fragments/processing-queue', (c) => {
   return c.html(renderProcessingQueue(getProcessingJobs()));
 });
@@ -1221,6 +1271,17 @@ app.post('/api/signal/:signal', (c) => {
     return c.html(renderRetryQueue(getRetryJobs(50)));
   }
 
+  if (signal === 'stop') {
+    // Set sync status to disconnected before stopping so UI updates
+    currentSyncStatus = 'disconnected';
+    statusEvents.emit('status', {
+      auth: currentAuthStatus,
+      syncStatus: 'disconnected',
+    });
+    sendSignal('stop');
+    return c.text('OK');
+  }
+
   return c.text('Unknown signal', 400);
 });
 
@@ -1314,6 +1375,7 @@ app.get('/api/events', async (c) => {
       stream.writeSSE({ event: 'syncing', data: renderSyncingBadge(status.syncStatus) });
       stream.writeSSE({ event: 'pause-button', data: renderPauseButton(status.syncStatus) });
       stream.writeSSE({ event: 'processing-title', data: renderProcessingTitle(isPaused) });
+      stream.writeSSE({ event: 'stop-section', data: renderStopSection(status.syncStatus) });
       // Re-render processing and pending queues to update icons based on pause state
       stream.writeSSE({
         event: 'processing-queue',
@@ -1357,6 +1419,7 @@ app.get('/api/events', async (c) => {
     await stream.writeSSE({ event: 'pending-queue', data: renderPendingQueue(pendingJobs) });
     await stream.writeSSE({ event: 'recent-queue', data: renderRecentQueue(recentJobs) });
     await stream.writeSSE({ event: 'retry-queue', data: renderRetryQueue(retryJobs) });
+    await stream.writeSSE({ event: 'stop-section', data: renderStopSection(currentSyncStatus) });
 
     // Cleanup on close
     stream.onAbort(() => {

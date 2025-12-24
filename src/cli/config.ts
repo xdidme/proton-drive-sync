@@ -6,7 +6,7 @@ import { isAlreadyRunning } from '../flags.js';
 import { startDashboard } from '../dashboard/server.js';
 import { loadConfig } from '../config.js';
 
-const SETTINGS_URL = 'http://localhost:4242/settings';
+const SETTINGS_URL = 'http://localhost:4242/controls';
 
 export function configCommand(): void {
   if (isAlreadyRunning()) {

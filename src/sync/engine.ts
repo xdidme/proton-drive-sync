@@ -9,7 +9,7 @@ import { SyncEventType } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { registerSignalHandler } from '../signals.js';
 import { setFlag, clearFlag, isPaused, FLAGS } from '../flags.js';
-import { stopDashboard, sendSyncHeartbeat } from '../dashboard/server.js';
+import { stopDashboard, sendStatusToDashboard } from '../dashboard/server.js';
 import { getConfig, onConfigChange } from '../config.js';
 import type { Config } from '../config.js';
 import type { ProtonDriveClient } from '../proton/types.js';
@@ -193,14 +193,14 @@ function startJobProcessorLoop(client: ProtonDriveClient, dryRun: boolean): Proc
     paused = true;
     setFlag(FLAGS.PAUSED);
     logger.info('Sync paused');
-    sendSyncHeartbeat(paused);
+    sendStatusToDashboard({ paused: true });
   };
 
   const handleResume = (): void => {
     paused = false;
     clearFlag(FLAGS.PAUSED);
     logger.info('Sync resumed');
-    sendSyncHeartbeat(paused);
+    sendStatusToDashboard({ paused: false });
   };
 
   // Check if we were paused before restart (hot reload)
@@ -216,7 +216,7 @@ function startJobProcessorLoop(client: ProtonDriveClient, dryRun: boolean): Proc
     if (!running) return;
 
     // Send heartbeat to dashboard to indicate sync loop is alive
-    sendSyncHeartbeat(paused);
+    sendStatusToDashboard({ paused });
 
     if (paused) {
       // When paused, poll every second to stay responsive

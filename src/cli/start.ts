@@ -9,7 +9,7 @@ import { logger, enableDebug, disableConsoleLogging, setDryRun } from '../logger
 import { startSignalListener, stopSignalListener, registerSignalHandler } from '../signals.js';
 import { acquireRunLock, releaseRunLock } from '../flags.js';
 import { getStoredCredentials, createClientFromTokens, type ProtonDriveClient } from './auth.js';
-import { startDashboard, stopDashboard, sendAuthStatus } from '../dashboard/server.js';
+import { startDashboard, stopDashboard, sendStatusToDashboard } from '../dashboard/server.js';
 import { runOneShotSync, runWatchMode } from '../sync/index.js';
 
 // ============================================================================
@@ -36,7 +36,7 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
   const storedCreds = await getStoredCredentials();
 
   if (!storedCreds) {
-    sendAuthStatus({ status: 'failed' });
+    sendStatusToDashboard({ auth: { status: 'failed' } });
     throw new Error('No credentials found. Run `proton-drive-sync auth` first.');
   }
 
@@ -47,11 +47,11 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    sendAuthStatus({ status: 'authenticating' });
+    sendStatusToDashboard({ auth: { status: 'authenticating' } });
 
     try {
       const client = await createClientFromTokens(storedCreds, sdkDebug);
-      sendAuthStatus({ status: 'authenticated', username: storedCreds.username });
+      sendStatusToDashboard({ auth: { status: 'authenticated', username: storedCreds.username } });
       logger.info('Authenticated.');
       return client;
     } catch (error) {
@@ -59,13 +59,13 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
 
       // Only retry on network errors (fetch failed)
       if (!lastError.message.includes('fetch failed')) {
-        sendAuthStatus({ status: 'failed' });
+        sendStatusToDashboard({ auth: { status: 'failed' } });
         throw lastError;
       }
 
       if (attempt < MAX_RETRIES - 1) {
         const delayMs = Math.pow(4, attempt) * 1000; // 1s, 4s, 16s, 64s
-        sendAuthStatus({ status: 'authenticating' });
+        sendStatusToDashboard({ auth: { status: 'authenticating' } });
         logger.warn(
           `Authentication failed (attempt ${attempt + 1}/${MAX_RETRIES}), retrying in ${delayMs / 1000}s...`
         );
@@ -74,7 +74,7 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
     }
   }
 
-  sendAuthStatus({ status: 'failed' });
+  sendStatusToDashboard({ auth: { status: 'failed' } });
   throw lastError;
 }
 
@@ -165,6 +165,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
   // Handle stop signal
   registerSignalHandler('stop', () => {
     logger.info('Stop signal received');
+    sendStatusToDashboard({ disconnected: true });
     cleanup().then(() => process.exit(0));
   });
 

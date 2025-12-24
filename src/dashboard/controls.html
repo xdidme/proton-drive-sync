@@ -1,97 +1,116 @@
 <div class="max-w-3xl mx-auto space-y-8">
-  <div class="flex items-center justify-between">
-    <h2 class="text-2xl font-bold text-white">Controls</h2>
-  </div>
+  <!-- Settings Section -->
+  <div>
+    <h2 class="text-2xl font-bold text-white mb-6">Settings</h2>
 
-  <!-- Start on Login Toggle -->
-  <div id="start-on-login-section" class="bg-gray-800 rounded-xl border border-gray-700 p-6">
-    <div class="flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <h3 class="text-lg font-semibold text-white">Start on Login</h3>
-        <div class="relative group">
-          <i data-lucide="info" class="w-4 h-4 text-gray-500 cursor-help"></i>
-          <div
-            class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-xs text-gray-300 w-72 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10"
-          >
-            When enabled, Proton Drive Sync will automatically start when you log in.
+    <div class="space-y-6">
+      <!-- Sync Concurrency -->
+      <div class="bg-gray-800 rounded-xl border border-gray-700 p-6">
+        <div class="flex items-center gap-2 mb-4">
+          <h3 class="text-lg font-semibold text-white">Sync Concurrency</h3>
+          <div class="relative group">
+            <i data-lucide="info" class="w-4 h-4 text-gray-500 cursor-help"></i>
+            <div
+              class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-xs text-gray-300 w-96 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10"
+            >
+              Number of files to upload/download simultaneously. Higher values may improve speed but
+              use more resources.
+            </div>
           </div>
         </div>
-      </div>
-      <button
-        id="start-on-login-toggle"
-        onclick="toggleStartOnLogin()"
-        class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-proton focus:ring-offset-2 focus:ring-offset-gray-800 bg-gray-600"
-        role="switch"
-        aria-checked="false"
-      >
-        <span
-          id="start-on-login-knob"
-          class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform translate-x-1"
-        ></span>
-      </button>
-    </div>
-  </div>
-
-  <!-- Sync Concurrency -->
-  <div class="bg-gray-800 rounded-xl border border-gray-700 p-6">
-    <div class="flex items-center gap-2 mb-4">
-      <h3 class="text-lg font-semibold text-white">Sync Concurrency</h3>
-      <div class="relative group">
-        <i data-lucide="info" class="w-4 h-4 text-gray-500 cursor-help"></i>
-        <div
-          class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-xs text-gray-300 w-96 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10"
-        >
-          Number of files to upload/download simultaneously. Higher values may improve speed but use
-          more resources.
+        <div class="flex items-center gap-4">
+          <input
+            type="range"
+            id="sync-concurrency"
+            min="1"
+            max="64"
+            class="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-proton"
+            oninput="document.getElementById('concurrency-value').textContent = this.value"
+          />
+          <span id="concurrency-value" class="w-8 text-center text-white font-mono">8</span>
         </div>
       </div>
-    </div>
-    <div class="flex items-center gap-4">
-      <input
-        type="range"
-        id="sync-concurrency"
-        min="1"
-        max="64"
-        class="flex-1 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-proton"
-        oninput="document.getElementById('concurrency-value').textContent = this.value"
-      />
-      <span id="concurrency-value" class="w-8 text-center text-white font-mono">8</span>
+
+      <!-- Sync Directories -->
+      <div class="bg-gray-800 rounded-xl border border-gray-700 p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-lg font-semibold text-white">Sync Directories</h3>
+          <button
+            onclick="addSyncDir()"
+            class="flex items-center gap-2 px-4 py-2 bg-proton hover:bg-proton-dark text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            <i data-lucide="plus" class="w-4 h-4"></i>
+            Add Directory
+          </button>
+        </div>
+
+        <div id="sync-dirs-list" class="space-y-3">
+          <!-- Sync dir entries will be added here -->
+        </div>
+
+        <div id="no-dirs-message" class="hidden text-center py-8 text-gray-500">
+          <i data-lucide="folder-x" class="w-12 h-12 mx-auto mb-3 opacity-50"></i>
+          <p>No sync directories configured</p>
+        </div>
+      </div>
+
+      <!-- Save Button -->
+      <div class="flex justify-end gap-4">
+        <button
+          onclick="saveConfig()"
+          id="save-button"
+          class="flex items-center gap-1 px-4 py-2 bg-proton hover:bg-proton-dark text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {{SAVE_BUTTON_TEXT}}
+          <i data-lucide="check" class="w-4 h-4 {{HIDE_CHECK_ICON}}"></i>
+          <i data-lucide="arrow-right" class="w-4 h-4 {{HIDE_ARROW_ICON}}"></i>
+        </button>
+      </div>
     </div>
   </div>
 
-  <!-- Sync Directories -->
-  <div class="bg-gray-800 rounded-xl border border-gray-700 p-6">
-    <div class="flex items-center justify-between mb-4">
-      <h3 class="text-lg font-semibold text-white">Sync Directories</h3>
-      <button
-        onclick="addSyncDir()"
-        class="flex items-center gap-2 px-4 py-2 bg-proton hover:bg-proton-dark text-white text-sm font-medium rounded-lg transition-colors"
-      >
-        <i data-lucide="plus" class="w-4 h-4"></i>
-        Add Directory
-      </button>
-    </div>
+  <!-- Controls Section -->
+  <div>
+    <h2 class="text-2xl font-bold text-white mb-6">Controls</h2>
 
-    <div id="sync-dirs-list" class="space-y-3">
-      <!-- Sync dir entries will be added here -->
-    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 [&:has(#stop-section:empty)]:lg:grid-cols-1">
+      <!-- Start on Login Toggle -->
+      <div id="start-on-login-section" class="bg-gray-800 rounded-xl border border-gray-700 p-6">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <h3 class="text-lg font-semibold text-white">Start on Login</h3>
+            <div class="relative group">
+              <i data-lucide="info" class="w-4 h-4 text-gray-500 cursor-help"></i>
+              <div
+                class="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-xs text-gray-300 w-72 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-10"
+              >
+                When enabled, Proton Drive Sync will automatically start when you log in.
+              </div>
+            </div>
+          </div>
+          <button
+            id="start-on-login-toggle"
+            onclick="toggleStartOnLogin()"
+            class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-proton focus:ring-offset-2 focus:ring-offset-gray-800 bg-gray-600"
+            role="switch"
+            aria-checked="false"
+          >
+            <span
+              id="start-on-login-knob"
+              class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform translate-x-1"
+            ></span>
+          </button>
+        </div>
+      </div>
 
-    <div id="no-dirs-message" class="hidden text-center py-8 text-gray-500">
-      <i data-lucide="folder-x" class="w-12 h-12 mx-auto mb-3 opacity-50"></i>
-      <p>No sync directories configured</p>
+      <!-- Stop Service -->
+      <div
+        id="stop-section"
+        hx-get="/api/fragments/stop-section"
+        hx-trigger="load"
+        hx-swap="innerHTML"
+        sse-swap="stop-section"
+      ></div>
     </div>
-  </div>
-
-  <!-- Save Button -->
-  <div class="flex justify-end gap-4">
-    <button
-      onclick="saveConfig()"
-      id="save-button"
-      class="flex items-center gap-1 px-4 py-2 bg-proton hover:bg-proton-dark text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-    >
-      {{SAVE_BUTTON_TEXT}}
-      <i data-lucide="check" class="w-4 h-4 {{HIDE_CHECK_ICON}}"></i>
-      <i data-lucide="arrow-right" class="w-4 h-4 {{HIDE_ARROW_ICON}}"></i>
-    </button>
   </div>
 </div>

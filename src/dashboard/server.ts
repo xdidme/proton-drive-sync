@@ -411,39 +411,33 @@ async function restartDashboard(): Promise<void> {
 }
 
 /**
- * Send auth status update to the dashboard process.
- * This updates the stored auth status and triggers a status send.
- */
-export function sendAuthStatus(update: AuthStatusUpdate): void {
-  // Store current auth status for hot reload
-  currentAuthStatus = update;
-  // Immediately send updated status (don't wait for next heartbeat)
-  sendStatusToDashboard();
-}
-
-/**
- * Signal that the sync process loop is alive.
- * Called periodically from engine.ts processLoop.
- */
-export function sendSyncHeartbeat(paused: boolean): void {
-  lastSyncHeartbeat = Date.now();
-  lastPausedState = paused;
-  sendStatusToDashboard();
-}
-
-/**
  * Send current status (auth + syncStatus) to the dashboard subprocess.
  * Always sends a heartbeat, but only includes status data if changed.
- * Called on heartbeat interval and when auth status changes.
- * @param force - If true, send status even if it hasn't changed (used for initial send)
+ * Called on heartbeat interval and when auth/sync status changes.
+ *
+ * @param options.auth - Auth status update (stores and sends immediately)
+ * @param options.paused - Sync loop heartbeat with paused state (updates heartbeat timestamp)
+ * @param options.disconnected - If true, marks sync as disconnected (resets heartbeat to 0)
  */
-function sendStatusToDashboard(force = false): void {
+export function sendStatusToDashboard(options?: {
+  auth?: AuthStatusUpdate;
+  paused?: boolean;
+  disconnected?: boolean;
+}): void {
+  // Update stored state based on options
+  if (options?.auth) {
+    currentAuthStatus = options.auth;
+  }
+  if (options?.paused !== undefined) {
+    lastSyncHeartbeat = Date.now();
+    lastPausedState = options.paused;
+  }
   if (!dashboardProcess?.connected) return;
 
   // Determine sync status
   const heartbeatRecent = Date.now() - lastSyncHeartbeat < SYNC_HEARTBEAT_TIMEOUT_MS;
   let syncStatus: SyncStatus;
-  if (!heartbeatRecent) {
+  if (!heartbeatRecent || options?.disconnected) {
     syncStatus = 'disconnected';
   } else if (lastPausedState) {
     syncStatus = 'paused';
@@ -460,9 +454,9 @@ function sendStatusToDashboard(force = false): void {
   const getUsername = (auth: AuthStatusUpdate) =>
     auth.status === 'authenticated' ? auth.username : undefined;
 
-  // Check if status has changed
+  // Check if status has changed (force send if any options were explicitly passed)
   const hasChanged =
-    force ||
+    !!options ||
     !lastSentStatus ||
     lastSentStatus.syncStatus !== status.syncStatus ||
     lastSentStatus.auth.status !== status.auth.status ||
