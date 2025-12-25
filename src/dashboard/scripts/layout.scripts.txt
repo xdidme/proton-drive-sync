@@ -25,9 +25,11 @@
 
     container.appendChild(toast);
 
-    // Trigger animation
+    // Trigger animation - double rAF ensures the browser has painted the initial state
     requestAnimationFrame(() => {
-      toast.classList.remove('translate-x-full', 'opacity-0');
+      requestAnimationFrame(() => {
+        toast.classList.remove('translate-x-full', 'opacity-0');
+      });
     });
 
     // Auto dismiss
