@@ -21,17 +21,20 @@ import {
   type FileChange,
 } from './watcher.js';
 import { enqueueJob } from './queue.js';
-import { processAllPendingJobs, setSyncConcurrency } from './processor.js';
+import {
+  processAvailableJobs,
+  waitForActiveTasks,
+  drainQueue,
+  setSyncConcurrency,
+} from './processor.js';
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-// Polling interval for processing jobs in watch mode (10 seconds)
-const JOB_POLL_INTERVAL_MS = 10_000;
-
-// Heartbeat interval to dashboard (2 seconds) - independent of job processing
-const SYNC_STATUS_HEARTBEAT_MS = 2_000;
+// Polling interval for processing jobs in watch mode (2 seconds)
+// Also serves as the dashboard heartbeat interval
+const JOB_POLL_INTERVAL_MS = 2_000;
 
 // ============================================================================
 // Types
@@ -110,9 +113,9 @@ export async function runOneShotSync(options: SyncOptions): Promise<void> {
 
   logger.info(`Found ${totalChanges} changes to sync`);
 
-  // Process all jobs
-  const processed = await processAllPendingJobs(client, dryRun);
-  logger.info(`Processed ${processed} jobs`);
+  // Process all jobs until queue is empty
+  await drainQueue(client, dryRun);
+  logger.info('Sync complete');
 
   closeWatchman();
 }
@@ -169,7 +172,7 @@ export async function runWatchMode(options: SyncOptions): Promise<void> {
   });
 
   // Cleanup
-  processorHandle.stop();
+  await processorHandle.stop();
   await stopDashboard();
   closeWatchman();
 }
@@ -179,7 +182,7 @@ export async function runWatchMode(options: SyncOptions): Promise<void> {
 // ============================================================================
 
 interface ProcessorHandle {
-  stop: () => void;
+  stop: () => Promise<void>;
   isPaused: () => boolean;
 }
 
@@ -190,7 +193,6 @@ function startJobProcessorLoop(client: ProtonDriveClient, dryRun: boolean): Proc
   let running = true;
   let paused = false;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
-  let heartbeatIntervalId: ReturnType<typeof setInterval> | null = null;
 
   // Register pause/resume signal handlers
   const handlePause = (): void => {
@@ -216,40 +218,18 @@ function startJobProcessorLoop(client: ProtonDriveClient, dryRun: boolean): Proc
   registerSignalHandler('pause-sync', handlePause);
   registerSignalHandler('resume-sync', handleResume);
 
-  // Start separate heartbeat loop - runs independently of job processing
-  // This ensures dashboard stays connected even during long-running jobs
-  sendStatusToDashboard({ paused }); // Send initial heartbeat immediately
-  heartbeatIntervalId = setInterval(() => {
-    sendStatusToDashboard({ paused });
-  }, SYNC_STATUS_HEARTBEAT_MS);
-
-  const processLoop = async (): Promise<void> => {
+  const processLoop = (): void => {
     if (!running) return;
 
-    if (paused) {
-      // When paused, poll every second to stay responsive
-      if (running) {
-        timeoutId = setTimeout(processLoop, 1000);
-      }
-      return;
-    }
+    // Always send heartbeat (merged with job processing)
+    sendStatusToDashboard({ paused });
 
-    const startTime = Date.now();
-    logger.debug('Job processor polling...');
-
-    try {
-      const processed = await processAllPendingJobs(client, dryRun);
-      if (processed > 0) {
-        logger.info(`Processed ${processed} sync job(s)`);
-      }
-    } catch (error) {
-      logger.error(`Job processor error: ${error}`);
+    if (!paused) {
+      processAvailableJobs(client, dryRun);
     }
 
     if (running) {
-      const elapsed = Date.now() - startTime;
-      const delay = Math.max(0, JOB_POLL_INTERVAL_MS - elapsed);
-      timeoutId = setTimeout(processLoop, delay);
+      timeoutId = setTimeout(processLoop, JOB_POLL_INTERVAL_MS);
     }
   };
 
@@ -257,16 +237,14 @@ function startJobProcessorLoop(client: ProtonDriveClient, dryRun: boolean): Proc
   processLoop();
 
   return {
-    stop: () => {
+    stop: async () => {
       running = false;
       if (timeoutId) {
         clearTimeout(timeoutId);
         timeoutId = null;
       }
-      if (heartbeatIntervalId) {
-        clearInterval(heartbeatIntervalId);
-        heartbeatIntervalId = null;
-      }
+      // Wait for active tasks to complete
+      await waitForActiveTasks();
     },
     isPaused: () => paused,
   };

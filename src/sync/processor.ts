@@ -9,7 +9,6 @@ import { createNode } from '../proton/create.js';
 import { deleteNode } from '../proton/delete.js';
 import { logger } from '../logger.js';
 import { DEFAULT_SYNC_CONCURRENCY } from '../config.js';
-import { registerSignalHandler, unregisterSignalHandler } from '../signals.js';
 import type { ProtonDriveClient } from '../proton/types.js';
 import {
   getNextPendingJob,
@@ -22,6 +21,13 @@ import {
 } from './queue.js';
 
 // ============================================================================
+// Task Pool State (persistent across iterations)
+// ============================================================================
+
+/** Active tasks: jobId -> promise */
+const activeTasks = new Map<number, Promise<void>>();
+
+// ============================================================================
 // Dynamic Concurrency
 // ============================================================================
 
@@ -32,6 +38,46 @@ let syncConcurrency = DEFAULT_SYNC_CONCURRENCY;
 export function setSyncConcurrency(value: number): void {
   syncConcurrency = value;
   logger.info(`Sync concurrency updated to ${value}`);
+}
+
+// ============================================================================
+// Task Pool Management
+// ============================================================================
+
+/**
+ * Wait for all active tasks to complete.
+ */
+export function waitForActiveTasks(): Promise<void> {
+  return Promise.all(activeTasks.values()).then(() => {});
+}
+
+/**
+ * Process all pending jobs until queue is empty (blocking).
+ * Used for one-shot sync mode.
+ */
+export async function drainQueue(client: ProtonDriveClient, dryRun: boolean): Promise<void> {
+  // Keep processing until no more jobs and no active tasks
+  while (true) {
+    processAvailableJobs(client, dryRun);
+
+    if (activeTasks.size === 0) {
+      // Check if there are more jobs (could have been added during processing)
+      const job = getNextPendingJob(dryRun);
+      if (!job) break; // Queue is truly empty
+
+      // Process it directly
+      const jobId = job.id;
+      const taskPromise = processJob(client, job, dryRun).finally(() => {
+        activeTasks.delete(jobId);
+      });
+      activeTasks.set(jobId, taskPromise);
+    }
+
+    // Wait for at least one task to complete
+    if (activeTasks.size > 0) {
+      await Promise.race(activeTasks.values());
+    }
+  }
 }
 
 // ============================================================================
@@ -87,18 +133,46 @@ async function deleteAndRecreateNode(
   return nodeUid;
 }
 
-// ============================================================================
-// Job Processing
-// ============================================================================
+/**
+ * Process available jobs up to concurrency limit (non-blocking).
+ * Spawns new tasks to fill available capacity and returns immediately.
+ * Call this periodically to keep the task pool saturated.
+ */
+export function processAvailableJobs(client: ProtonDriveClient, dryRun: boolean): void {
+  // Calculate available capacity
+  const availableSlots = syncConcurrency - activeTasks.size;
+  if (availableSlots <= 0) return;
+
+  // Spawn tasks to fill available slots
+  for (let i = 0; i < availableSlots; i++) {
+    const job = getNextPendingJob(dryRun);
+    if (!job) break; // No more pending jobs
+
+    const jobId = job.id;
+
+    // Start the job and track it
+    const taskPromise = processJob(client, job, dryRun).finally(() => {
+      activeTasks.delete(jobId);
+    });
+
+    activeTasks.set(jobId, taskPromise);
+  }
+}
 
 /**
- * Process a single job from the queue.
- * Returns true if a job was processed, false if queue is empty.
+ * Process a single job (internal helper).
  */
-export async function processNextJob(client: ProtonDriveClient, dryRun: boolean): Promise<boolean> {
-  const job = getNextPendingJob(dryRun);
-  if (!job) return false;
-
+async function processJob(
+  client: ProtonDriveClient,
+  job: {
+    id: number;
+    eventType: SyncEventType;
+    localPath: string;
+    remotePath: string | null;
+    nRetries: number;
+  },
+  dryRun: boolean
+): Promise<void> {
   const { id, eventType, localPath, remotePath, nRetries } = job;
 
   try {
@@ -114,7 +188,6 @@ export async function processNextJob(client: ProtonDriveClient, dryRun: boolean)
     }
 
     markJobSynced(id, localPath, dryRun);
-    return true;
   } catch (error) {
     const errorMessage = getErrorMessage(error);
     const { category: errorCategory, maxRetries } = categorizeError(errorMessage);
@@ -144,62 +217,5 @@ export async function processNextJob(client: ProtonDriveClient, dryRun: boolean)
       logger.error(`Job ${id} (${localPath}) failed: ${errorMessage}`);
       scheduleRetry(id, localPath, nRetries, errorCategory, dryRun);
     }
-
-    return true;
   }
-}
-
-/**
- * Process all pending jobs in the queue with concurrency.
- * Stops processing if a stop or pause signal is received.
- * Returns the number of jobs processed.
- */
-export async function processAllPendingJobs(
-  client: ProtonDriveClient,
-  dryRun: boolean
-): Promise<number> {
-  let count = 0;
-  let stopRequested = false;
-
-  const handleStop = (): void => {
-    stopRequested = true;
-  };
-  const handlePause = (): void => {
-    stopRequested = true;
-  };
-  registerSignalHandler('stop', handleStop);
-  registerSignalHandler('pause-sync', handlePause);
-
-  try {
-    // Process jobs with up to syncConcurrency in parallel using a worker pool pattern
-    const activeJobs = new Set<Promise<boolean>>();
-
-    const startNextJob = (): void => {
-      if (stopRequested) return;
-      const jobPromise = processNextJob(client, dryRun).then((processed) => {
-        activeJobs.delete(jobPromise);
-        if (processed) {
-          count++;
-          startNextJob(); // Replenish the pool
-        }
-        return processed;
-      });
-      activeJobs.add(jobPromise);
-    };
-
-    // Start initial batch of concurrent jobs (uses current syncConcurrency)
-    for (let i = 0; i < syncConcurrency; i++) {
-      startNextJob();
-    }
-
-    // Wait for pool to drain
-    while (activeJobs.size > 0) {
-      await Promise.race(activeJobs);
-    }
-  } finally {
-    unregisterSignalHandler('stop', handleStop);
-    unregisterSignalHandler('pause-sync', handlePause);
-  }
-
-  return count;
 }

@@ -39,4 +39,9 @@ export {
 } from './queue.js';
 
 // Processor (job execution)
-export { processNextJob, processAllPendingJobs } from './processor.js';
+export {
+  processAvailableJobs,
+  waitForActiveTasks,
+  drainQueue,
+  setSyncConcurrency,
+} from './processor.js';
