@@ -65,6 +65,16 @@ import homeScripts from './scripts/home.scripts.html' with { type: 'text' };
 import controlsScripts from './scripts/controls.scripts.html' with { type: 'text' };
 import aboutScripts from './scripts/about.scripts.html' with { type: 'text' };
 
+// Cast to string (Bun types these as HTMLBundle but they're strings at runtime)
+// See: https://github.com/oven-sh/bun/issues - import attributes not reflected in types
+const layoutHtml = layoutHtmlTemplate as unknown as string;
+const homeHtml = homeHtmlTemplate as unknown as string;
+const controlsHtml = controlsHtmlTemplate as unknown as string;
+const aboutHtml = aboutHtmlTemplate as unknown as string;
+const homeScriptsHtml = homeScripts as unknown as string;
+const controlsScriptsHtml = controlsScripts as unknown as string;
+const aboutScriptsHtml = aboutScripts as unknown as string;
+
 // Embed assets at compile time (required for compiled binaries)
 import iconSvg from './assets/icon.svg' with { type: 'text' };
 import githubSvg from './assets/github.svg' with { type: 'text' };
@@ -212,7 +222,7 @@ function renderStats(counts: {
   synced: number;
   blocked: number;
 }): string {
-  return Stats({ counts }).toString();
+  return Stats({ counts })!.toString();
 }
 
 /** Render processing queue HTML (header with pause button + list) */
@@ -221,27 +231,27 @@ function renderProcessingQueue(jobs: DashboardJob[]): string {
     jobs,
     syncStatus: currentSyncStatus,
     authStatus: currentAuthStatus,
-  }).toString();
+  })!.toString();
 }
 
 /** Render blocked queue HTML (header + list) */
 function renderBlockedQueue(jobs: DashboardJob[]): string {
-  return BlockedQueue({ jobs }).toString();
+  return BlockedQueue({ jobs })!.toString();
 }
 
 /** Render recent queue HTML (header + list) */
 function renderRecentQueue(jobs: DashboardJob[]): string {
-  return RecentQueue({ jobs }).toString();
+  return RecentQueue({ jobs })!.toString();
 }
 
 /** Render pending queue HTML (header + list) */
 function renderPendingQueue(jobs: DashboardJob[]): string {
-  return PendingQueue({ jobs }).toString();
+  return PendingQueue({ jobs })!.toString();
 }
 
 /** Render retry queue HTML (header with button + list) */
 function renderRetryQueue(jobs: DashboardJob[]): string {
-  return RetryQueue({ jobs }).toString();
+  return RetryQueue({ jobs })!.toString();
 }
 
 /** Render auth status HTML */
@@ -364,7 +374,7 @@ function renderSyncingBadge(syncStatus: SyncStatus): string {
 
 /** Render pause/resume button (hidden when disconnected) */
 function renderPauseButton(syncStatus: SyncStatus): string {
-  return PauseButton({ syncStatus }).toString();
+  return PauseButton({ syncStatus })!.toString();
 }
 
 /** Render dry-run banner HTML */
@@ -519,8 +529,8 @@ let isDryRun = false;
 
 /** Get controls scripts with redirect URL injected */
 function controlsScriptsWithRedirect(isOnboarding: boolean): string {
-  const redirectUrl = isOnboarding ? '/about' : '';
-  return controlsScripts.replace('{{REDIRECT_AFTER_SAVE}}', redirectUrl);
+  const redirectUrl = isOnboarding ? '/' : '/controls';
+  return controlsScriptsHtml.replace('{{REDIRECT_AFTER_SAVE}}', redirectUrl);
 }
 
 /**
@@ -572,7 +582,7 @@ async function composePage(
 
 // Use embedded layout template
 function getLayout(): string {
-  return layoutHtmlTemplate;
+  return layoutHtml;
 }
 
 // Serve dashboard HTML at root
@@ -585,7 +595,7 @@ app.get('/', async (c) => {
   const s = snapshot();
 
   // Server-side render all home page fragments
-  const homeContent = homeHtmlTemplate
+  const homeContent = homeHtml
     .replace('{{STATS_CONTENT}}', renderFragment(FRAG.stats, s))
     .replace('{{CONFIG_INFO_CONTENT}}', renderFragment(FRAG.configInfo, s))
     .replace('{{PENDING_QUEUE_CONTENT}}', renderFragment(FRAG.pendingQueue, s))
@@ -597,7 +607,7 @@ app.get('/', async (c) => {
   const html = await composePage(layout, homeContent, {
     title: 'Proton Drive Sync',
     activeTab: 'home',
-    pageScripts: homeScripts,
+    pageScripts: homeScriptsHtml,
   });
   return c.html(html);
 });
@@ -609,7 +619,7 @@ app.get('/controls', async (c) => {
   const isOnboarding = !hasFlag(FLAGS.ONBOARDED);
 
   // Server-side render stop-section fragment
-  let content = controlsHtmlTemplate.replace(
+  let content = controlsHtml.replace(
     '{{STOP_SECTION_CONTENT}}',
     renderFragment(FRAG.stopSection, s)
   );
@@ -632,7 +642,7 @@ app.get('/controls', async (c) => {
 // Serve about page
 app.get('/about', async (c) => {
   const layout = getLayout();
-  let content = aboutHtmlTemplate;
+  let content = aboutHtml;
   // Inject version from package.json (embedded at build time)
   const pkg = await import('../../package.json');
   content = content.replace('{{VERSION}}', pkg.default.version);
@@ -641,7 +651,7 @@ app.get('/about', async (c) => {
   const html = await composePage(layout, content, {
     title: 'About - Proton Drive Sync',
     activeTab: 'about',
-    pageScripts: aboutScripts,
+    pageScripts: aboutScriptsHtml,
     isOnboarded,
   });
   return c.html(html);

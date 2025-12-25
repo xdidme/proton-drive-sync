@@ -4,7 +4,7 @@
 
 import { confirm } from '@inquirer/prompts';
 import { gt } from 'drizzle-orm';
-import { db, schema } from '../db/index.js';
+import { db, schema, run } from '../db/index.js';
 
 export async function resetCommand(options: {
   yes: boolean;
@@ -37,11 +37,9 @@ export async function resetCommand(options: {
   }
 
   if (retriesOnly) {
-    const result = db
-      .update(schema.syncJobs)
-      .set({ retryAt: new Date() })
-      .where(gt(schema.syncJobs.nRetries, 0))
-      .run();
+    const result = run(
+      db.update(schema.syncJobs).set({ retryAt: new Date() }).where(gt(schema.syncJobs.nRetries, 0))
+    );
     console.log(`Cleared retry delay for ${result.changes} job(s).`);
   } else if (signalsOnly) {
     db.delete(schema.signals).run();

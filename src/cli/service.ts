@@ -79,13 +79,13 @@ function unloadService(name: string, plistPath: string): void {
   }
 }
 
-export async function serviceInstallCommand(interactive: boolean = true): Promise<boolean> {
+export async function serviceInstallCommand(interactive: boolean = true): Promise<void> {
   if (process.platform !== 'darwin') {
     if (interactive) {
       console.error('Error: Service installation is only supported on macOS.');
       process.exit(1);
     }
-    return false;
+    return;
   }
 
   const binPath = getBinPathSafe();
@@ -97,7 +97,7 @@ export async function serviceInstallCommand(interactive: boolean = true): Promis
       );
       process.exit(1);
     }
-    return false;
+    return;
   }
 
   // Create LaunchAgents directory if it doesn't exist
@@ -152,8 +152,6 @@ export async function serviceInstallCommand(interactive: boolean = true): Promis
   if (!installedAny) {
     console.log('\nNo services were installed.');
   }
-
-  return installedAny;
 }
 
 export async function serviceUninstallCommand(): Promise<void> {

@@ -35,6 +35,7 @@ dev:
 
 # Run pre-commit checks on all files
 pre-commit:
+	bun run build:check
 	bun eslint --fix 'src/**/*.ts'
 	bun prettier --write 'src/**/*.ts' '*.json' '*.md'
 

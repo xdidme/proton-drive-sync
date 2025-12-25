@@ -8,6 +8,7 @@ import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { xdgState } from 'xdg-basedir';
 import { Database } from 'bun:sqlite';
+import type { Changes } from 'bun:sqlite';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
 import * as schema from './schema.js';
 
@@ -119,3 +120,16 @@ async function initializeDatabase() {
 
 export const db = await initializeDatabase();
 export { schema };
+
+// ============================================================================
+// Drizzle Run Helper
+// ============================================================================
+
+/**
+ * Execute a Drizzle query and return the Changes result.
+ * Workaround for Drizzle ORM bun-sqlite driver typing bug where
+ * .run() is typed as void but actually returns Changes.
+ */
+export function run<T extends { run(): void }>(query: T): Changes {
+  return query.run() as unknown as Changes;
+}

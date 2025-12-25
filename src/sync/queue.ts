@@ -6,7 +6,7 @@
 
 import { EventEmitter } from 'events';
 import { eq, and, lte, inArray, isNull, sql } from 'drizzle-orm';
-import { db, schema } from '../db/index.js';
+import { db, schema, run } from '../db/index.js';
 import { SyncJobStatus, SyncEventType } from '../db/schema.js';
 import { logger, isDebugEnabled } from '../logger.js';
 
@@ -128,29 +128,30 @@ export function enqueueJob(
   }
 
   // INSERT ... ON CONFLICT DO UPDATE is a single atomic SQL statement
-  const result = db
-    .insert(schema.syncJobs)
-    .values({
-      eventType: params.eventType,
-      localPath: params.localPath,
-      remotePath: params.remotePath,
-      status: SyncJobStatus.PENDING,
-      retryAt: new Date(),
-      nRetries: 0,
-      lastError: null,
-    })
-    .onConflictDoUpdate({
-      target: schema.syncJobs.localPath,
-      set: {
+  const result = run(
+    db
+      .insert(schema.syncJobs)
+      .values({
         eventType: params.eventType,
+        localPath: params.localPath,
         remotePath: params.remotePath,
         status: SyncJobStatus.PENDING,
         retryAt: new Date(),
         nRetries: 0,
         lastError: null,
-      },
-    })
-    .run();
+      })
+      .onConflictDoUpdate({
+        target: schema.syncJobs.localPath,
+        set: {
+          eventType: params.eventType,
+          remotePath: params.remotePath,
+          status: SyncJobStatus.PENDING,
+          retryAt: new Date(),
+          nRetries: 0,
+          lastError: null,
+        },
+      })
+  );
 
   // Emit event for dashboard
   jobEvents.emit('job', {
@@ -207,22 +208,28 @@ export function getNextPendingJob(dryRun: boolean = false): Job | undefined {
   // This handles jobs left in PROCESSING state due to crashes/restarts
   const staleThreshold = new Date(Date.now() - STALE_PROCESSING_MS);
   const staleReset = db.transaction((tx) => {
-    const reset = tx
-      .update(schema.syncJobs)
-      .set({ status: SyncJobStatus.PENDING })
-      .where(
-        and(
-          eq(schema.syncJobs.status, SyncJobStatus.PROCESSING),
-          inArray(
-            schema.syncJobs.localPath,
-            tx
-              .select({ localPath: schema.processingQueue.localPath })
-              .from(schema.processingQueue)
-              .where(lte(schema.processingQueue.startedAt, staleThreshold))
+    // Find stale local paths
+    const stalePaths = tx
+      .select({ localPath: schema.processingQueue.localPath })
+      .from(schema.processingQueue)
+      .where(lte(schema.processingQueue.startedAt, staleThreshold))
+      .all();
+
+    if (stalePaths.length === 0) return 0;
+
+    const pathList = stalePaths.map((p) => p.localPath);
+
+    const reset = run(
+      tx
+        .update(schema.syncJobs)
+        .set({ status: SyncJobStatus.PENDING })
+        .where(
+          and(
+            eq(schema.syncJobs.status, SyncJobStatus.PROCESSING),
+            inArray(schema.syncJobs.localPath, pathList)
           )
         )
-      )
-      .run();
+    );
 
     tx.delete(schema.processingQueue)
       .where(lte(schema.processingQueue.startedAt, staleThreshold))
@@ -633,16 +640,17 @@ export function retryAllNow(): number {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const now = new Date();
 
-  const result = db
-    .update(schema.syncJobs)
-    .set({ retryAt: now })
-    .where(
-      and(
-        eq(schema.syncJobs.status, SyncJobStatus.PENDING),
-        sql`${schema.syncJobs.retryAt} > ${nowSeconds}`
+  const result = run(
+    db
+      .update(schema.syncJobs)
+      .set({ retryAt: now })
+      .where(
+        and(
+          eq(schema.syncJobs.status, SyncJobStatus.PENDING),
+          sql`${schema.syncJobs.retryAt} > ${nowSeconds}`
+        )
       )
-    )
-    .run();
+  );
 
   if (result.changes > 0) {
     logger.info(`Moved ${result.changes} jobs from retry queue to immediate processing`);

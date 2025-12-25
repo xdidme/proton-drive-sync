@@ -12,7 +12,6 @@ export {
   findFileByName,
   findFolderByName,
   traverseRemotePath,
-  nodeStreamToWebStream,
   formatSize,
 } from './utils.js';
 export type {
