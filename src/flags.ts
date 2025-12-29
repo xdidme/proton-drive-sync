@@ -13,13 +13,19 @@ export const FLAGS = {
   ONBOARDING: 'onboarding', // Data: 'about' or 'completed'
   SERVICE_INSTALLED: 'service_installed',
   SERVICE_LOADED: 'service_loaded',
-  WATCHMAN_SPAWNED: 'watchman_spawned',
+  WATCHMAN_RUNNING: 'watchman_running', // Data: 'spawned' or 'existing'
 } as const;
 
 // Onboarding states (used as data for ONBOARDING flag)
 export const ONBOARDING_STATE = {
   ABOUT: 'about',
   COMPLETED: 'completed',
+} as const;
+
+// Watchman states (used as data for WATCHMAN_RUNNING flag)
+export const WATCHMAN_STATE = {
+  SPAWNED: 'spawned', // We started Watchman
+  EXISTING: 'existing', // Watchman was already running
 } as const;
 
 // Flag name for running PID (stored as "running_pid:<pid>")
@@ -193,10 +199,11 @@ export function acquireRunLock(): boolean {
 }
 
 /**
- * Release the run lock: removes the running PID and paused flags.
+ * Release the run lock: removes the running PID, paused, and watchman flags.
  * Should be called during graceful shutdown.
  */
 export function releaseRunLock(): void {
   clearFlag(RUNNING_PID_FLAG, ALL_VARIANTS);
   clearFlag(FLAGS.PAUSED);
+  clearFlag(FLAGS.WATCHMAN_RUNNING, ALL_VARIANTS);
 }

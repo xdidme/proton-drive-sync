@@ -1,8 +1,17 @@
 import type { FC } from 'hono/jsx';
 
-export const WelcomeModal: FC = () => {
+interface WelcomeModalProps {
+  watchmanReady?: boolean;
+}
+
+export const WelcomeModal: FC<WelcomeModalProps> = ({ watchmanReady = false }) => {
   return (
-    <div id="welcome-modal" class="fixed inset-0 z-50 flex items-center justify-center">
+    <div
+      id="welcome-modal"
+      class="fixed inset-0 z-50 flex items-center justify-center"
+      sse-swap="welcome-modal"
+      hx-swap="outerHTML"
+    >
       {/* Backdrop */}
       <div class="absolute inset-0 bg-black/60"></div>
 
@@ -40,15 +49,22 @@ export const WelcomeModal: FC = () => {
           Access it anytime at <span class="text-proton font-mono">localhost:4242</span>
         </p>
 
-        {/* Button */}
+        {/* Action */}
         <div class="flex justify-center">
-          <button
-            type="button"
-            onclick="document.getElementById('welcome-modal').remove()"
-            class="px-6 py-2.5 bg-proton hover:bg-proton-dark text-white text-sm font-medium rounded-lg transition-colors"
-          >
-            Begin Onboarding
-          </button>
+          {watchmanReady ? (
+            <button
+              type="button"
+              onclick="document.getElementById('welcome-modal').remove()"
+              class="px-6 py-2.5 bg-proton hover:bg-proton-dark text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              Begin Onboarding
+            </button>
+          ) : (
+            <div class="flex items-center justify-center gap-3 text-gray-400">
+              <i data-lucide="loader-circle" class="w-5 h-5 animate-spin"></i>
+              <span class="text-sm">Waiting for Watchman to start...</span>
+            </div>
+          )}
         </div>
       </div>
     </div>

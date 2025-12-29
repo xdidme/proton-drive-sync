@@ -271,11 +271,9 @@ export async function startCommand(options: StartOptions): Promise<void> {
   if (watchMode) {
     startDashboard(config, dryRun);
 
-    // Handle refresh-status signal for immediate dashboard updates (e.g., after pause toggle)
-    registerSignalHandler('refresh-status', () => {
-      const paused = isPaused();
-      logger.info(`Sync ${paused ? 'paused' : 'resumed'}`);
-      sendStatusToDashboard({ paused });
+    // Handle refresh-dashboard signal for immediate dashboard updates (e.g., after pause toggle, watchman ready)
+    registerSignalHandler('refresh-dashboard', () => {
+      sendStatusToDashboard({ paused: isPaused() });
     });
   }
 

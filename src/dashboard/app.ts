@@ -23,7 +23,15 @@ import {
   getRetryJobs,
   retryAllNow,
 } from '../sync/queue.js';
-import { FLAGS, ONBOARDING_STATE, setFlag, clearFlag, hasFlag, getFlagData } from '../flags.js';
+import {
+  FLAGS,
+  ONBOARDING_STATE,
+  setFlag,
+  clearFlag,
+  hasFlag,
+  getFlagData,
+  ALL_VARIANTS,
+} from '../flags.js';
 import { sendSignal } from '../signals.js';
 import { logger, enableIpcLogging } from '../logger.js';
 import { CONFIG_FILE, CONFIG_CHECK_SIGNAL } from '../config.js';
@@ -98,6 +106,7 @@ export const FRAG = {
   pauseButton: 'pause-button',
   dryRunBanner: 'dry-run-banner',
   configInfo: 'config-info',
+  welcomeModal: 'welcome-modal',
 } as const;
 
 export type FragmentKey = (typeof FRAG)[keyof typeof FRAG];
@@ -117,6 +126,7 @@ export type DashboardSnapshot = {
   syncStatus: SyncStatus;
   dryRun: boolean;
   config: Config | null;
+  watchmanReady: boolean;
 };
 
 export function snapshot(limit = 50): DashboardSnapshot {
@@ -131,6 +141,7 @@ export function snapshot(limit = 50): DashboardSnapshot {
     syncStatus: currentSyncStatus,
     dryRun: isDryRun,
     config: currentConfig,
+    watchmanReady: hasFlag(FLAGS.WATCHMAN_RUNNING, ALL_VARIANTS),
   };
 }
 
@@ -500,6 +511,11 @@ function renderSyncDirsHtml(dirs: Config['sync_dirs']): string {
     .join('');
 }
 
+/** Render welcome modal (entire modal with spinner or button based on watchman state) */
+function renderWelcomeModal(watchmanReady: boolean): string {
+  return WelcomeModal({ watchmanReady })!.toString();
+}
+
 /** Render config info HTML */
 function renderConfigInfo(config: Config | null): string {
   if (!config) return '';
@@ -567,6 +583,8 @@ export function renderFragment(key: FragmentKey, s: DashboardSnapshot): string {
       return renderDryRunBanner(s.dryRun);
     case FRAG.configInfo:
       return renderConfigInfo(s.config);
+    case FRAG.welcomeModal:
+      return renderWelcomeModal(s.watchmanReady);
     default:
       return '';
   }
@@ -712,7 +730,8 @@ app.get('/controls', async (c) => {
 
   // Add welcome modal during onboarding
   if (isOnboarding) {
-    content += WelcomeModal({})!.toString();
+    const watchmanReady = hasFlag(FLAGS.WATCHMAN_RUNNING, ALL_VARIANTS);
+    content += WelcomeModal({ watchmanReady })!.toString();
   }
 
   const html = await composePage(layout, content, {
@@ -797,7 +816,8 @@ app.get('/api/modal/no-sync-dirs', (c) => {
 
 // Serve welcome modal (shown during onboarding)
 app.get('/api/modal/welcome', (c) => {
-  return c.html(WelcomeModal({})!.toString());
+  const watchmanReady = hasFlag(FLAGS.WATCHMAN_RUNNING, ALL_VARIANTS);
+  return c.html(WelcomeModal({ watchmanReady })!.toString());
 });
 
 /** Set onboarded flag */
@@ -860,7 +880,7 @@ app.post('/api/toggle-pause', (c) => {
     setFlag(FLAGS.PAUSED);
   }
   // Signal sync engine to refresh dashboard status immediately
-  sendSignal('refresh-status');
+  sendSignal('refresh-dashboard');
   // Return the new button state (optimistic UI update for button only)
   // The badge will update via the heartbeat path when the engine responds
   // Include both pause buttons with OOB swap for the controls page button
@@ -1095,6 +1115,7 @@ app.get('/api/events', async (c) => {
       FRAG.stopSection,
       FRAG.dryRunBanner,
       FRAG.configInfo,
+      FRAG.welcomeModal,
     ]);
 
     // Job diff: push job-related fragments (processing-queue only if changed)
@@ -1134,6 +1155,7 @@ app.get('/api/events', async (c) => {
         FRAG.controlsPauseButton,
         FRAG.stopSection,
         FRAG.processingQueue, // Re-render to update spinners when paused/resumed
+        FRAG.welcomeModal,
       ]);
       stream.writeSSE({ event: 'heartbeat', data: '' });
     };

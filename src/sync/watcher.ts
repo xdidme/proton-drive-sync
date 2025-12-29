@@ -9,7 +9,8 @@ import { basename } from 'path';
 import watchman from 'fb-watchman';
 import { getClock, setClock } from '../state.js';
 import { logger } from '../logger.js';
-import { setFlag, clearFlag, hasFlag, FLAGS } from '../flags.js';
+import { setFlag, clearFlag, getFlagData, FLAGS, WATCHMAN_STATE, ALL_VARIANTS } from '../flags.js';
+import { sendSignal } from '../signals.js';
 import type { Config } from '../config.js';
 
 // ============================================================================
@@ -74,11 +75,15 @@ export async function connectWatchman(): Promise<void> {
   await watchmanCommand<{ version: string }>(['version']);
 
   if (!wasRunning) {
-    setFlag(FLAGS.WATCHMAN_SPAWNED);
+    setFlag(FLAGS.WATCHMAN_RUNNING, WATCHMAN_STATE.SPAWNED);
     logger.debug('Watchman was not running, we spawned it');
   } else {
+    setFlag(FLAGS.WATCHMAN_RUNNING, WATCHMAN_STATE.EXISTING);
     logger.debug('Watchman was already running');
   }
+
+  // Signal dashboard to refresh (watchman is now ready)
+  sendSignal('refresh-dashboard');
 }
 
 /** Close the Watchman client connection */
@@ -88,11 +93,12 @@ export function closeWatchman(): void {
 
 /** Shutdown watchman server if we spawned it */
 export function shutdownWatchman(): void {
-  if (hasFlag(FLAGS.WATCHMAN_SPAWNED)) {
+  const watchmanState = getFlagData(FLAGS.WATCHMAN_RUNNING);
+  if (watchmanState === WATCHMAN_STATE.SPAWNED) {
     logger.debug('Shutting down watchman server (we spawned it)');
     Bun.spawnSync(['watchman', 'shutdown-server']);
-    clearFlag(FLAGS.WATCHMAN_SPAWNED);
   }
+  clearFlag(FLAGS.WATCHMAN_RUNNING, ALL_VARIANTS);
 }
 
 // ============================================================================
