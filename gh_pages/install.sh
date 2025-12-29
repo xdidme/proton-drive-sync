@@ -120,10 +120,14 @@ mkdir -p "$INSTALL_DIR"
 
 if [ -z "$requested_version" ]; then
 	url="https://github.com/$REPO/releases/latest/download/$filename"
-	specific_version=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+	# Extract version from redirect URL to avoid GitHub API rate limits
+	redirect_url=$(curl -sIL -o /dev/null -w "%{url_effective}" "https://github.com/$REPO/releases/latest" 2>/dev/null)
+	specific_version=$(echo "$redirect_url" | sed -n 's|.*/tag/v\([^/]*\)$|\1|p')
 
-	if [[ $? -ne 0 || -z "$specific_version" ]]; then
+	if [[ -z "$specific_version" ]]; then
 		echo -e "${RED}Failed to fetch version information${NC}"
+		echo -e "${MUTED}Could not determine latest version from: $redirect_url${NC}"
+		echo -e "${MUTED}Try specifying a version manually: --version 0.1.0${NC}"
 		exit 1
 	fi
 else
