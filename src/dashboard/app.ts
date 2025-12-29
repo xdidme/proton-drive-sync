@@ -23,7 +23,7 @@ import {
   getRetryJobs,
   retryAllNow,
 } from '../sync/queue.js';
-import { FLAGS, setFlag, clearFlag, hasFlag } from '../flags.js';
+import { FLAGS, ONBOARDING_STATE, setFlag, clearFlag, hasFlag, getFlagData } from '../flags.js';
 import { sendSignal } from '../signals.js';
 import { logger, enableIpcLogging } from '../logger.js';
 import { CONFIG_FILE, CONFIG_CHECK_SIGNAL } from '../config.js';
@@ -53,6 +53,8 @@ import { RecentQueue } from './views/fragments/RecentQueue.js';
 import { PendingQueue } from './views/fragments/PendingQueue.js';
 import { RetryQueue } from './views/fragments/RetryQueue.js';
 import { PauseButton } from './views/fragments/PauseButton.js';
+import { AddDirectoryModal } from './views/fragments/AddDirectoryModal.js';
+import { NoSyncDirsModal } from './views/fragments/NoSyncDirsModal.js';
 
 // Embed HTML templates at compile time as text (required for compiled binaries)
 import layoutHtml from './layout.html.txt';
@@ -444,6 +446,11 @@ function escapeHtml(text: string): string {
     .replace(/'/g, '&#039;');
 }
 
+/** Render add directory error message HTML */
+function renderAddDirError(message: string): string {
+  return `<div id="add-dir-error" class="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">${escapeHtml(message)}</div>`;
+}
+
 /** Render sync directories HTML for SSR */
 function renderSyncDirsHtml(dirs: Config['sync_dirs']): string {
   return dirs
@@ -473,7 +480,7 @@ function renderSyncDirsHtml(dirs: Config['sync_dirs']): string {
             </div>
             <input
               type="text"
-              value="${escapeHtml(dir.remote_root || '/')}"
+              value="${escapeHtml(dir.remote_root || '')}"
               onchange="updateSyncDir(${index}, 'remote_root', this.value)"
               placeholder="/"
               class="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white font-mono text-sm focus:outline-none focus:border-proton"
@@ -595,10 +602,10 @@ async function composePage(
     title: string;
     activeTab: 'home' | 'controls' | 'about';
     pageScripts: string;
-    isOnboarded?: boolean;
   }
 ): Promise<string> {
-  const isOnboarded = options.isOnboarded ?? hasFlag(FLAGS.ONBOARDED);
+  const onboardingState = getFlagData(FLAGS.ONBOARDING);
+  const hideTabsDuringOnboarding = !onboardingState;
   const homeTabClass =
     options.activeTab === 'home'
       ? 'text-white border-b-2 border-white'
@@ -623,7 +630,7 @@ async function composePage(
     .replace('{{HOME_TAB_CLASS}}', homeTabClass)
     .replace('{{CONTROLS_TAB_CLASS}}', controlsTabClass)
     .replace('{{ABOUT_TAB_CLASS}}', aboutTabClass)
-    .replace('{{HIDE_HOME_TAB}}', isOnboarded ? '' : 'hidden')
+    .replaceAll('{{HIDE_TABS_DURING_ONBOARDING}}', hideTabsDuringOnboarding ? 'hidden' : '')
     .replace('{{HIDE_BADGES}}', options.activeTab === 'about' ? 'hidden' : '')
     .replace('{{AUTH_STATUS_CONTENT}}', authStatusContent)
     .replace('{{SYNCING_STATUS_CONTENT}}', syncingStatusContent)
@@ -641,7 +648,8 @@ function getLayout(): string {
 // Serve dashboard HTML at root
 app.get('/', async (c) => {
   // Redirect to controls if not onboarded
-  if (!hasFlag(FLAGS.ONBOARDED)) {
+  const onboardingState = getFlagData(FLAGS.ONBOARDING);
+  if (!onboardingState) {
     return c.redirect('/controls');
   }
   const layout = getLayout();
@@ -669,7 +677,7 @@ app.get('/', async (c) => {
 app.get('/controls', async (c) => {
   const layout = getLayout();
   const s = snapshot();
-  const isOnboarding = !hasFlag(FLAGS.ONBOARDED);
+  const isOnboarding = !getFlagData(FLAGS.ONBOARDING);
 
   // Server-side render stop-section fragment
   let content = controlsHtml.replace(
@@ -710,7 +718,6 @@ app.get('/controls', async (c) => {
     title: 'Controls - Proton Drive Sync',
     activeTab: 'controls',
     pageScripts: controlsScriptsWithValues(isOnboarding, syncDirs, syncConcurrency, serviceEnabled),
-    isOnboarded: !isOnboarding,
   });
   return c.html(html);
 });
@@ -722,13 +729,18 @@ app.get('/about', async (c) => {
   // Inject version from package.json (embedded at build time)
   const pkg = await import('../../package.json');
   content = content.replace('{{VERSION}}', pkg.default.version);
-  const isOnboarded = hasFlag(FLAGS.ONBOARDED);
-  content = content.replace('{{HIDE_START_BUTTON}}', isOnboarded ? 'hidden' : '');
+
+  // Get current onboarding state
+  const onboardingState = getFlagData(FLAGS.ONBOARDING);
+
+  // Show button only in 'about' state (just arrived from controls)
+  const showStartButton = onboardingState === ONBOARDING_STATE.ABOUT;
+  content = content.replace('{{HIDE_START_BUTTON}}', showStartButton ? '' : 'hidden');
+
   const html = await composePage(layout, content, {
     title: 'About - Proton Drive Sync',
     activeTab: 'about',
     pageScripts: aboutScriptsHtml,
-    isOnboarded,
   });
   return c.html(html);
 });
@@ -771,9 +783,20 @@ app.get('/api/fragments/:key', (c) => {
   return c.html(renderFragment(key, s));
 });
 
+// Serve add directory modal
+app.get('/api/modal/add-directory', (c) => {
+  return c.html(AddDirectoryModal({})!.toString());
+});
+
+// Serve no sync dirs warning modal
+app.get('/api/modal/no-sync-dirs', (c) => {
+  const redirectUrl = c.req.query('redirect') || '';
+  return c.html(NoSyncDirsModal({ redirectUrl })!.toString());
+});
+
 /** Set onboarded flag */
 app.post('/api/onboard', (c) => {
-  setFlag(FLAGS.ONBOARDED);
+  setFlag(FLAGS.ONBOARDING, ONBOARDING_STATE.COMPLETED);
   return c.json({ success: true });
 });
 
@@ -900,12 +923,78 @@ app.post('/api/config', async (c) => {
     // Update local state
     currentConfig = newConfig;
 
+    // Mark as onboarded (shows home tab)
+    setFlag(FLAGS.ONBOARDING, ONBOARDING_STATE.ABOUT);
+
     // Send signal to trigger config reload in sync process
     sendSignal(CONFIG_CHECK_SIGNAL);
 
     return c.json({ success: true, config: newConfig });
   } catch (err) {
     return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+/** Add a single directory via modal form and return updated list */
+app.post('/api/add-directory', async (c) => {
+  try {
+    const formData = await c.req.parseBody();
+    const sourcePath = ((formData.source_path as string) || '').trim();
+    const remoteRoot = ((formData.remote_root as string) || '/').trim();
+
+    // Validate source_path is provided
+    if (!sourcePath) {
+      return c.html(renderAddDirError('Local path is required'), 400, {
+        'HX-Retarget': '#add-dir-error',
+        'HX-Reswap': 'outerHTML',
+      });
+    }
+
+    // Validate remote_root starts with /
+    if (remoteRoot && !remoteRoot.startsWith('/')) {
+      return c.html(renderAddDirError('Remote root must start with /'), 400, {
+        'HX-Retarget': '#add-dir-error',
+        'HX-Reswap': 'outerHTML',
+      });
+    }
+
+    // Validate local path exists on filesystem
+    const file = Bun.file(sourcePath);
+    const exists = await file.exists();
+    if (!exists) {
+      return c.html(renderAddDirError(`Local path does not exist: ${sourcePath}`), 400, {
+        'HX-Retarget': '#add-dir-error',
+        'HX-Reswap': 'outerHTML',
+      });
+    }
+
+    // Add to config
+    const newDir = { source_path: sourcePath, remote_root: remoteRoot };
+    const newConfig: Config = {
+      sync_dirs: [...(currentConfig?.sync_dirs || []), newDir],
+      sync_concurrency: currentConfig?.sync_concurrency || 8,
+    };
+
+    // Write to config file
+    await Bun.write(CONFIG_FILE, JSON.stringify(newConfig, null, 2));
+    currentConfig = newConfig;
+
+    // Signal config reload
+    sendSignal(CONFIG_CHECK_SIGNAL);
+
+    // Return updated list HTML + trigger events to close modal and sync JS state
+    const html = renderSyncDirsHtml(newConfig.sync_dirs);
+    return c.html(html, 200, {
+      'HX-Trigger': JSON.stringify({
+        'dir-added': { dirs: newConfig.sync_dirs },
+        'close-modal': true,
+      }),
+    });
+  } catch (err) {
+    return c.html(renderAddDirError(`Error: ${(err as Error).message}`), 500, {
+      'HX-Retarget': '#add-dir-error',
+      'HX-Reswap': 'outerHTML',
+    });
   }
 });
 

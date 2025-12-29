@@ -106,15 +106,20 @@ export async function serviceInstallCommand(interactive: boolean = true): Promis
   }
 }
 
-export async function serviceUninstallCommand(): Promise<void> {
+export async function serviceUninstallCommand(interactive: boolean = true): Promise<void> {
   if (process.platform !== 'darwin') {
-    console.error('Error: Service uninstallation is only supported on macOS.');
-    process.exit(1);
+    if (interactive) {
+      console.error('Error: Service uninstallation is only supported on macOS.');
+      process.exit(1);
+    }
+    return;
   }
 
   // Uninstall proton-drive-sync service
   if (existsSync(PLIST_PATH)) {
-    const uninstallSync = await askYesNo('Uninstall proton-drive-sync service?');
+    const uninstallSync = interactive
+      ? await askYesNo('Uninstall proton-drive-sync service?')
+      : true;
     if (uninstallSync) {
       console.log('Uninstalling proton-drive-sync service...');
       unloadSyncService();
@@ -124,7 +129,7 @@ export async function serviceUninstallCommand(): Promise<void> {
     } else {
       console.log('Skipping proton-drive-sync service.');
     }
-  } else {
+  } else if (interactive) {
     console.log('No service is installed.');
   }
 }

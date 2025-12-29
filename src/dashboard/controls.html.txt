@@ -78,7 +78,9 @@
         <div class="flex items-center justify-between mb-4">
           <h3 class="text-lg font-semibold text-white">Sync Directories</h3>
           <button
-            onclick="addSyncDir()"
+            hx-get="/api/modal/add-directory"
+            hx-target="body"
+            hx-swap="beforeend"
             class="flex items-center gap-2 px-4 py-2 bg-proton hover:bg-proton-dark text-white text-sm font-medium rounded-lg transition-colors"
           >
             <i data-lucide="plus" class="w-4 h-4"></i>

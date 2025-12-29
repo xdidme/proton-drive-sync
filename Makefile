@@ -23,7 +23,7 @@ dev:
 	@watchman watch-project . > /dev/null
 	@make build
 	@bash -c 'while true; do \
-		PATH="$(PWD)/dist:$$PATH" proton-drive-sync start --no-daemon & \
+		PATH="$(PWD)/dist:$$PATH" proton-drive-sync start --no-daemon --debug & \
 		PID=$$!; \
 		watchman-wait . -m 1 -p "src/**/*"; \
 		kill $$PID 2>/dev/null; \

@@ -51,6 +51,7 @@ program
     0
   )
   .option('--dashboard', 'Run as dashboard subprocess (internal use)')
+  .option('--paused', 'Start with syncing paused (requires watch mode)')
   .action(startCommand);
 
 program
@@ -91,7 +92,8 @@ serviceCommand
 serviceCommand
   .command('uninstall')
   .description('Stop and uninstall the launchd service')
-  .action(serviceUninstallCommand);
+  .option('-y, --yes', 'Skip confirmation prompts')
+  .action((options) => serviceUninstallCommand(!options.yes));
 
 serviceCommand.command('load').description('Load the service').action(serviceLoadCommand);
 

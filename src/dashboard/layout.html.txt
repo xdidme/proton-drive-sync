@@ -155,7 +155,7 @@
           <nav class="flex items-center gap-1">
             <a
               href="/"
-              class="{{HIDE_HOME_TAB}} flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium transition-colors whitespace-nowrap {{HOME_TAB_CLASS}}"
+              class="{{HIDE_TABS_DURING_ONBOARDING}} flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium transition-colors whitespace-nowrap {{HOME_TAB_CLASS}}"
             >
               <i data-lucide="house" class="w-4 h-4 shrink-0"></i>
               <!-- Tab labels: first to collapse (below 850px) -->
@@ -171,7 +171,7 @@
             </a>
             <a
               href="/about"
-              class="flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium transition-colors whitespace-nowrap {{ABOUT_TAB_CLASS}}"
+              class="{{HIDE_TABS_DURING_ONBOARDING}} flex items-center gap-1.5 px-2 py-1.5 text-sm font-medium transition-colors whitespace-nowrap {{ABOUT_TAB_CLASS}}"
             >
               <i data-lucide="compass" class="w-4 h-4 shrink-0"></i>
               <!-- Tab labels: first to collapse (below 850px) -->

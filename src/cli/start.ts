@@ -7,7 +7,7 @@
 import { loadConfig, watchConfig } from '../config.js';
 import { logger, enableDebug, setDryRun } from '../logger.js';
 import { startSignalListener, stopSignalListener, registerSignalHandler } from '../signals.js';
-import { acquireRunLock, releaseRunLock } from '../flags.js';
+import { acquireRunLock, releaseRunLock, setFlag, FLAGS } from '../flags.js';
 import { getStoredCredentials, createClientFromTokens, type ProtonDriveClient } from './auth.js';
 import { startDashboard, stopDashboard, sendStatusToDashboard } from '../dashboard/server.js';
 import { startDashboardMode } from '../dashboard/app.js';
@@ -23,6 +23,7 @@ interface StartOptions {
   dryRun?: boolean;
   debug?: number;
   dashboard?: boolean;
+  paused?: boolean;
 }
 
 // ============================================================================
@@ -99,6 +100,7 @@ function spawnDaemon(options: StartOptions): void {
   if (options.watch === false) args.push('--no-watch');
   if (options.dryRun) args.push('--dry-run');
   if (options.debug) args.push('--debug', String(options.debug));
+  if (options.paused) args.push('--paused');
 
   // Use the binary name - PATH resolution will find it
   const child = Bun.spawn(['proton-drive-sync', ...args], {
@@ -131,6 +133,12 @@ export async function startCommand(options: StartOptions): Promise<void> {
   // Validate: --no-watch requires --no-daemon
   if (options.watch === false && options.daemon !== false) {
     console.error('Error: --no-watch requires --no-daemon');
+    process.exit(1);
+  }
+
+  // Validate: --paused requires watch mode
+  if (options.paused && options.watch === false) {
+    console.error('Error: --paused requires watch mode');
     process.exit(1);
   }
 
@@ -175,6 +183,12 @@ export async function startCommand(options: StartOptions): Promise<void> {
   if (!lockAcquired) {
     logger.error('Another instance is already running. Use `proton-drive-sync stop` to stop it.');
     process.exit(1);
+  }
+
+  // Set paused flag if --paused was passed
+  if (options.paused) {
+    setFlag(FLAGS.PAUSED);
+    logger.info('Starting in paused state');
   }
 
   // Start signal listener for IPC

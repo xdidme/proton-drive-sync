@@ -114,11 +114,6 @@
     lucide.createIcons();
   }
 
-  function addSyncDir() {
-    syncDirs.push({ source_path: '', remote_root: '/' });
-    renderSyncDirs();
-  }
-
   function removeSyncDir(index) {
     syncDirs.splice(index, 1);
     renderSyncDirs();
@@ -142,12 +137,8 @@
   async function saveConfig() {
     const saveButton = document.getElementById('save-button');
 
-    // Validate
+    // Get valid directories (those with source_path)
     const validDirs = syncDirs.filter((d) => d.source_path.trim());
-    if (validDirs.length === 0) {
-      showToast('At least one sync directory is required', 'error', 5000);
-      return;
-    }
 
     const config = {
       sync_concurrency: parseInt(document.getElementById('sync-concurrency').value) || 8,
@@ -169,14 +160,23 @@
       const result = await response.json();
 
       if (result.success) {
-        if (redirectAfterSave) {
-          // During onboarding, redirect immediately without toast
+        // Update local state
+        originalConfig = JSON.parse(JSON.stringify(config));
+        syncDirs = config.sync_dirs.length > 0 ? config.sync_dirs : [];
+        renderSyncDirs();
+
+        if (validDirs.length === 0) {
+          // Show warning modal for 0 dirs
+          const modalResponse = await fetch('/api/modal/no-sync-dirs?redirect=' + encodeURIComponent(redirectAfterSave || ''));
+          const modalHtml = await modalResponse.text();
+          document.body.insertAdjacentHTML('beforeend', modalHtml);
+          lucide.createIcons();
+        } else if (redirectAfterSave) {
+          // During onboarding with dirs, redirect immediately
           window.location.href = redirectAfterSave;
         } else {
+          // Normal save with dirs
           showToast('Settings saved successfully!', 'success');
-          originalConfig = JSON.parse(JSON.stringify(config));
-          syncDirs = config.sync_dirs;
-          renderSyncDirs();
         }
       } else {
         showToast(result.error || 'Failed to save settings', 'error', 5000);
@@ -211,6 +211,28 @@
       button.disabled = false;
     }
   }
+
+  // Listen for dir-added event from HTMX to sync JS state
+  document.body.addEventListener('dir-added', function (e) {
+    syncDirs = e.detail.dirs;
+    // Hide no-dirs message if we have dirs
+    const noMessage = document.getElementById('no-dirs-message');
+    if (syncDirs.length > 0) {
+      noMessage.classList.add('hidden');
+    }
+    lucide.createIcons();
+  });
+
+  // Listen for close-modal event from HTMX
+  document.body.addEventListener('close-modal', function () {
+    const modal = document.getElementById('add-dir-modal');
+    if (modal) modal.remove();
+  });
+
+  // Re-initialize Lucide icons after any htmx swap
+  document.body.addEventListener('htmx:afterSwap', function () {
+    lucide.createIcons();
+  });
 
   // Load service status on page load (for toggle sync)
   loadServiceStatus();

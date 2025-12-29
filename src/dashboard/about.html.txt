@@ -77,7 +77,7 @@
           return false;
         "
         id="start-using-button"
-        class="flex items-center text-gray-400 hover:text-gray-300 text-sm transition-colors px-4 py-2 border border-gray-600 rounded-full hover:border-gray-500"
+        class="flex items-center bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm font-medium transition-colors px-4 py-2 rounded-full"
       >
         Start using
         <i data-lucide="rocket" class="w-4 h-4 ml-1"></i>
