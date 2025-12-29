@@ -72,6 +72,7 @@
   function removeSyncDir(index) {
     syncDirs.splice(index, 1);
     renderSyncDirs();
+    saveConfig();
   }
 
   function updateSyncDir(index, field, value) {

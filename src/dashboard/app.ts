@@ -793,6 +793,35 @@ app.post('/api/onboard', (c) => {
   return c.json({ success: true });
 });
 
+/** Complete onboarding controls step (sets state to ABOUT) */
+app.post('/api/complete-onboarding-controls', (c) => {
+  // Check if there are any sync directories configured
+  if (!currentConfig?.sync_dirs || currentConfig.sync_dirs.length === 0) {
+    // Return the warning modal via HX-Reswap
+    // OK button will call /api/complete-onboarding-controls-force to proceed anyway
+    return c.html(
+      NoSyncDirsModal({ redirectUrl: '/api/complete-onboarding-controls-force' })!.toString(),
+      200,
+      {
+        'HX-Reswap': 'beforeend',
+        'HX-Retarget': 'body',
+      }
+    );
+  }
+
+  // Set onboarding state and redirect to about page
+  setFlag(FLAGS.ONBOARDING, ONBOARDING_STATE.ABOUT);
+  return c.html('', 200, {
+    'HX-Redirect': '/about',
+  });
+});
+
+/** Force complete onboarding controls (skip empty sync dirs warning) */
+app.get('/api/complete-onboarding-controls-force', (c) => {
+  setFlag(FLAGS.ONBOARDING, ONBOARDING_STATE.ABOUT);
+  return c.redirect('/about');
+});
+
 /** Toggle service start-on-login */
 app.post('/api/toggle-service', (c) => {
   const isEnabled = hasFlag(FLAGS.SERVICE_LOADED);

@@ -81,13 +81,15 @@
 
       <!-- Next Button (onboarding only) -->
       <div class="flex justify-end gap-4 {{HIDE_NEXT_BUTTON}}">
-        <a
-          href="/about"
+        <button
+          type="button"
+          hx-post="/api/complete-onboarding-controls"
+          hx-swap="none"
           class="flex items-center gap-1 px-4 py-2 bg-proton hover:bg-proton-dark text-white text-sm font-medium rounded-lg transition-colors"
         >
           Next
           <i data-lucide="arrow-right" class="w-4 h-4"></i>
-        </a>
+        </button>
       </div>
     </div>
   </div>

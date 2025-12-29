@@ -28,15 +28,8 @@ export const NoSyncDirsModal: FC<NoSyncDirsModalProps> = ({ redirectUrl }) => {
           directory.
         </p>
 
-        {/* Buttons */}
-        <div class="flex justify-end gap-3">
-          <button
-            type="button"
-            onclick="document.getElementById('no-sync-dirs-modal').remove()"
-            class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium rounded-lg transition-colors"
-          >
-            Cancel
-          </button>
+        {/* Button */}
+        <div class="flex justify-end">
           <button
             type="button"
             onclick={okAction}
