@@ -18,6 +18,8 @@ jobs:
             target: darwin-x64
           - os: ubuntu-latest
             target: linux-x64
+          - os: windows-latest
+            target: windows-x64
 
     runs-on: ${{ matrix.os }}
 
@@ -46,21 +48,55 @@ jobs:
           sudo chmod +x /usr/local/bin/watchman
           sudo chmod 1777 /usr/local/var/run/watchman
 
+      - name: Install Watchman (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/facebook/watchman/releases/latest"
+          $asset = $release.assets | Where-Object { $_.name -like "*windows.zip" }
+          Write-Host "Downloading Watchman from $($asset.browser_download_url)"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile watchman.zip
+          Expand-Archive watchman.zip -DestinationPath watchman-extract
+          $watchmanDir = Get-ChildItem -Path watchman-extract -Directory | Select-Object -First 1
+          $watchmanBin = "$($watchmanDir.FullName)\bin"
+          Write-Host "Adding $watchmanBin to PATH"
+          echo "$watchmanBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
       - name: Install dependencies
         run: bun install
 
-      - name: Build binary
+      - name: Build binary (Unix)
+        if: runner.os != 'Windows'
         run: bun build --compile --minify --target=bun-${{ matrix.target }} ./src/index.ts --outfile ./proton-drive-sync
 
-      - name: Create tarball
+      - name: Build binary (Windows)
+        if: runner.os == 'Windows'
+        run: bun build --compile --minify --target=bun-${{ matrix.target }} ./src/index.ts --outfile ./proton-drive-sync.exe
+
+      - name: Create tarball (Unix)
+        if: runner.os != 'Windows'
         run: |
           tar -czvf proton-drive-sync-${{ matrix.target }}.tar.gz proton-drive-sync
 
-      - name: Upload artifact
+      - name: Create zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path proton-drive-sync.exe -DestinationPath proton-drive-sync-${{ matrix.target }}.zip
+
+      - name: Upload artifact (Unix)
+        if: runner.os != 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: proton-drive-sync-${{ matrix.target }}
           path: proton-drive-sync-${{ matrix.target }}.tar.gz
+
+      - name: Upload artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: proton-drive-sync-${{ matrix.target }}
+          path: proton-drive-sync-${{ matrix.target }}.zip
 
   release:
     needs: build
@@ -75,5 +111,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*.tar.gz
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
           generate_release_notes: true

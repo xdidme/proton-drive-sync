@@ -7,8 +7,8 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { xdgConfig } from 'xdg-basedir';
 import { logger } from './logger.js';
+import { getConfigDir } from './paths.js';
 import { registerSignalHandler, sendSignal } from './signals.js';
 
 // ============================================================================
@@ -41,12 +41,7 @@ export const CONFIG_CHECK_SIGNAL = 'config:check';
 /** Default sync concurrency */
 export const DEFAULT_SYNC_CONCURRENCY = 4;
 
-if (!xdgConfig) {
-  logger.error('Could not determine XDG config directory');
-  process.exit(1);
-}
-
-const CONFIG_DIR = join(xdgConfig, 'proton-drive-sync');
+const CONFIG_DIR = getConfigDir();
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 
 export { CONFIG_DIR, CONFIG_FILE };

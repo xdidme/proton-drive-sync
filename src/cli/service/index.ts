@@ -4,6 +4,7 @@
  * Delegates to platform-specific implementations:
  * - macOS: launchd (LaunchAgents)
  * - Linux: systemd (user services)
+ * - Windows: Task Scheduler
  */
 
 import * as readline from 'readline';
@@ -27,9 +28,12 @@ function askYesNo(question: string): Promise<boolean> {
 }
 
 function getBinPathSafe(): string | null {
-  const result = Bun.spawnSync(['which', 'proton-drive-sync']);
+  const cmd = process.platform === 'win32' ? 'where' : 'which';
+  const result = Bun.spawnSync([cmd, 'proton-drive-sync']);
   if (result.exitCode !== 0) return null;
-  return new TextDecoder().decode(result.stdout).trim();
+  const output = new TextDecoder().decode(result.stdout).trim();
+  // 'where' on Windows may return multiple lines; take the first
+  return output.split('\n')[0].trim();
 }
 
 async function getServiceManager(): Promise<ServiceOperations> {
@@ -39,18 +43,23 @@ async function getServiceManager(): Promise<ServiceOperations> {
   } else if (process.platform === 'linux') {
     const mod = await import('./service-linux.js');
     return mod.linuxService;
+  } else if (process.platform === 'win32') {
+    const mod = await import('./service-windows.js');
+    return mod.windowsService;
   }
   throw new Error(`Unsupported platform: ${process.platform}`);
 }
 
 function isSupportedPlatform(): boolean {
-  return process.platform === 'darwin' || process.platform === 'linux';
+  return (
+    process.platform === 'darwin' || process.platform === 'linux' || process.platform === 'win32'
+  );
 }
 
 export async function serviceInstallCommand(interactive: boolean = true): Promise<void> {
   if (!isSupportedPlatform()) {
     if (interactive) {
-      logger.error(`Service installation is only supported on macOS and Linux.`);
+      logger.error(`Service installation is only supported on macOS, Linux, and Windows.`);
       process.exit(1);
     }
     return;
@@ -60,9 +69,15 @@ export async function serviceInstallCommand(interactive: boolean = true): Promis
   if (!binPath) {
     if (interactive) {
       logger.error('proton-drive-sync not found in PATH.');
-      logger.error(
-        'Install with: curl -fsSL https://proton-drive-sync.damianb.dev/install.sh | bash'
-      );
+      if (process.platform === 'win32') {
+        logger.error(
+          'Install with: irm https://www.damianb.dev/proton-drive-sync/install.ps1 | iex'
+        );
+      } else {
+        logger.error(
+          'Install with: bash <(curl -fsSL https://www.damianb.dev/proton-drive-sync/install.sh)'
+        );
+      }
       process.exit(1);
     }
     return;
@@ -81,7 +96,7 @@ export async function serviceInstallCommand(interactive: boolean = true): Promis
 export async function serviceUninstallCommand(interactive: boolean = true): Promise<void> {
   if (!isSupportedPlatform()) {
     if (interactive) {
-      logger.error(`Service uninstallation is only supported on macOS and Linux.`);
+      logger.error(`Service uninstallation is only supported on macOS, Linux, and Windows.`);
       process.exit(1);
     }
     return;
@@ -139,7 +154,7 @@ export async function unloadSyncService(): Promise<boolean> {
 
 export async function serviceUnloadCommand(): Promise<void> {
   if (!isSupportedPlatform()) {
-    logger.error(`Service management is only supported on macOS and Linux.`);
+    logger.error(`Service management is only supported on macOS, Linux, and Windows.`);
     process.exit(1);
   }
 
@@ -153,7 +168,7 @@ export async function serviceUnloadCommand(): Promise<void> {
 
 export async function serviceLoadCommand(): Promise<void> {
   if (!isSupportedPlatform()) {
-    logger.error(`Service management is only supported on macOS and Linux.`);
+    logger.error(`Service management is only supported on macOS, Linux, and Windows.`);
     process.exit(1);
   }
 

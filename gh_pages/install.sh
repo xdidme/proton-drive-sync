@@ -6,7 +6,21 @@ REPO="damianb-bitflipper/proton-drive-sync"
 MUTED='\033[0;2m'
 RED='\033[0;31m'
 ORANGE='\033[38;5;214m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
+
+show_banner() {
+	echo -e "${CYAN}"
+	cat <<'EOF'
+  ____            _                ____       _              ____                   
+ |  _ \ _ __ ___ | |_ ___  _ __   |  _ \ _ __(_)_   _____   / ___| _   _ _ __   ___ 
+ | |_) | '__/ _ \| __/ _ \| '_ \  | | | | '__| \ \ / / _ \  \___ \| | | | '_ \ / __|
+ |  __/| | | (_) | || (_) | | | | | |_| | |  | |\ V /  __/   ___) | |_| | | | | (__ 
+ |_|   |_|  \___/ \__\___/|_| |_| |____/|_|  |_| \_/ \___|  |____/ \__, |_| |_|\___|
+                                                                   |___/            
+EOF
+	echo -e "${NC}"
+}
 
 usage() {
 	cat <<EOF
@@ -71,6 +85,7 @@ if [[ "$arch" == "x86_64" ]]; then
 fi
 
 # Rosetta detection (macOS only)
+show_banner
 if [ "$os" = "darwin" ] && [ "$arch" = "x64" ]; then
 	rosetta_flag=$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)
 	if [ "$rosetta_flag" = "1" ]; then

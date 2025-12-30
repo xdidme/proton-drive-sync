@@ -232,10 +232,13 @@ export async function startCommand(options: StartOptions): Promise<void> {
     process.exit(1);
   });
 
-  process.on('SIGTERM', () => {
-    logger.info('SIGTERM received, shutting down...');
-    cleanup().then(() => process.exit(0));
-  });
+  // Windows doesn't support SIGTERM - only register on Unix platforms
+  if (process.platform !== 'win32') {
+    process.on('SIGTERM', () => {
+      logger.info('SIGTERM received, shutting down...');
+      cleanup().then(() => process.exit(0));
+    });
+  }
 
   // Handle Ctrl+C early (before auth) to ensure cleanup
   process.once('SIGINT', () => {

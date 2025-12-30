@@ -4,15 +4,10 @@
 
 import { existsSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
-import { xdgState } from 'xdg-basedir';
+import { getStateDir } from '../paths.js';
 import { logger } from '../logger.js';
 
-if (!xdgState) {
-  logger.error('Could not determine XDG state directory');
-  process.exit(1);
-}
-
-const STATE_DIR = join(xdgState, 'proton-drive-sync');
+const STATE_DIR = getStateDir();
 const LOG_PATH = join(STATE_DIR, 'sync.log');
 
 interface LogsOptions {
@@ -27,21 +22,42 @@ export function logsCommand(options: LogsOptions): void {
   }
 
   if (options.follow) {
-    // Use tail -f to follow logs
-    const tail = Bun.spawn(['tail', '-f', LOG_PATH], {
-      stdio: ['inherit', 'inherit', 'inherit'],
-    });
+    if (process.platform === 'win32') {
+      // Windows: Use PowerShell Get-Content -Wait
+      const ps = Bun.spawn(
+        ['powershell', '-Command', `Get-Content -Path "${LOG_PATH}" -Wait -Tail 50`],
+        {
+          stdio: ['inherit', 'inherit', 'inherit'],
+        }
+      );
 
-    tail.exited.catch((err: Error) => {
-      logger.error('Failed to follow logs:', err.message);
-      process.exit(1);
-    });
+      ps.exited.catch((err: Error) => {
+        logger.error('Failed to follow logs:', err.message);
+        process.exit(1);
+      });
 
-    // Handle Ctrl+C gracefully
-    process.on('SIGINT', () => {
-      tail.kill();
-      process.exit(0);
-    });
+      // Handle Ctrl+C gracefully
+      process.on('SIGINT', () => {
+        ps.kill();
+        process.exit(0);
+      });
+    } else {
+      // Unix: Use tail -f
+      const tail = Bun.spawn(['tail', '-f', LOG_PATH], {
+        stdio: ['inherit', 'inherit', 'inherit'],
+      });
+
+      tail.exited.catch((err: Error) => {
+        logger.error('Failed to follow logs:', err.message);
+        process.exit(1);
+      });
+
+      // Handle Ctrl+C gracefully
+      process.on('SIGINT', () => {
+        tail.kill();
+        process.exit(0);
+      });
+    }
   } else {
     const content = readFileSync(LOG_PATH, 'utf-8');
 

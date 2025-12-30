@@ -10,16 +10,25 @@ Automatically syncs selected local folders to Proton Drive in the background, wi
 
 ### Quick Start
 
-Installs `proton-drive-sync` and walks you through authentication and setup:
+#### macOS / Linux
 
 ```bash
 bash <(curl -fsSL https://www.damianb.dev/proton-drive-sync/install.sh)
 ```
 
+#### Windows
+
+```powershell
+irm https://www.damianb.dev/proton-drive-sync/install.ps1 | iex
+```
+
 ### Requirements
 
-- macOS (Linux/Windows not yet supported — [open an issue](https://github.com/damianb-bitflipper/proton-drive-sync/issues) to register interest)
-- [Homebrew](https://brew.sh)
+| Platform    | Requirements                               |
+| ----------- | ------------------------------------------ |
+| **macOS**   | [Homebrew](https://brew.sh) (for Watchman) |
+| **Linux**   | x64 architecture, systemd                  |
+| **Windows** | x64 architecture, PowerShell 5.1+          |
 
 ### Dashboard
 
@@ -37,8 +46,16 @@ The dashboard runs locally at http://localhost:4242. Use it to configure and man
 
 ### Uninstall
 
+#### macOS / Linux
+
 ```bash
 bash <(curl -fsSL https://www.damianb.dev/proton-drive-sync/uninstall.sh)
+```
+
+#### Windows
+
+```powershell
+irm https://www.damianb.dev/proton-drive-sync/uninstall.ps1 | iex
 ```
 
 ## Development

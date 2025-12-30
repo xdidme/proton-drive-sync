@@ -6,12 +6,11 @@
 
 import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import { xdgState } from 'xdg-basedir';
 import { Database } from 'bun:sqlite';
 import type { Changes } from 'bun:sqlite';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
 import * as schema from './schema.js';
-import { logger } from '../logger.js';
+import { getStateDir } from '../paths.js';
 
 // Import migrations as text (embedded at compile time)
 // When adding new migrations, add a new import and entry to the migrations array below
@@ -35,12 +34,7 @@ const migrations = [
 // Constants
 // ============================================================================
 
-if (!xdgState) {
-  logger.error('Could not determine XDG state directory');
-  process.exit(1);
-}
-
-export const STATE_DIR = join(xdgState, 'proton-drive-sync');
+export const STATE_DIR = getStateDir();
 const DB_PATH = join(STATE_DIR, 'state.db');
 
 // ============================================================================

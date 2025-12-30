@@ -149,7 +149,8 @@ const API_BASE_URL = 'https://api.protonmail.ch';
 const SRP_LEN = 256; // 2048 / 8, in bytes
 const AUTH_VERSION = 4;
 const BCRYPT_PREFIX = '$2y$10$';
-const PLATFORM = process.platform === 'darwin' ? 'macos' : 'linux';
+const PLATFORM =
+  process.platform === 'darwin' ? 'macos' : process.platform === 'win32' ? 'windows' : 'linux';
 const APP_VERSION = `${PLATFORM}-drive@1.0.0-alpha.1`;
 
 // SRP Modulus verification key
