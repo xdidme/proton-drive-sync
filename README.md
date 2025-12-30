@@ -3,7 +3,7 @@
 Automatically syncs selected local folders to Proton Drive in the background, with a dashboard for monitoring.
 
 <p align="center">
-  <img src="readme_assets/home.png" alt="Dashboard" width="600">
+  <video src="readme_assets/proton_drive_sync_demo.mp4" width="600" controls></video>
 </p>
 
 ## Getting Started
