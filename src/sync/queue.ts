@@ -125,7 +125,7 @@ export function enqueueJob(params: EnqueueJobParams, dryRun: boolean, tx: Tx): v
   }
 
   // INSERT ... ON CONFLICT DO UPDATE is a single atomic SQL statement
-  const result = run(
+  run(
     tx
       .insert(schema.syncJobs)
       .values({
@@ -156,10 +156,22 @@ export function enqueueJob(params: EnqueueJobParams, dryRun: boolean, tx: Tx): v
       })
   );
 
+  // Query for the actual job ID (lastInsertRowid is unreliable for upserts/updates)
+  const job = tx
+    .select({ id: schema.syncJobs.id })
+    .from(schema.syncJobs)
+    .where(eq(schema.syncJobs.localPath, params.localPath))
+    .get();
+
+  if (!job) {
+    logger.error(`Failed to find job after upsert for ${params.localPath}`);
+    return;
+  }
+
   // Emit event for dashboard
   jobEvents.emit('job', {
     type: 'enqueue',
-    jobId: Number(result.lastInsertRowid),
+    jobId: job.id,
     localPath: params.localPath,
     remotePath: params.remotePath,
     timestamp: new Date(),
