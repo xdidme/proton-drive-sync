@@ -121,9 +121,9 @@ fi
 # Prompt user about Watchman
 if command -v watchman >/dev/null 2>&1; then
 	echo -e "${MUTED}Watchman is still installed on your system.${NC}"
-	read -p "Would you like to remove Watchman as well? [y/N] " -n 1 -r
+	read -p "Would you like to remove Watchman as well? [Y/n] " -n 1 -r
 	echo -e ""
-	if [[ $REPLY =~ ^[Yy]$ ]]; then
+	if [[ ! $REPLY =~ ^[Nn]$ ]]; then
 		if [ "$os" = "darwin" ]; then
 			# macOS: use Homebrew
 			if command -v brew >/dev/null 2>&1; then
