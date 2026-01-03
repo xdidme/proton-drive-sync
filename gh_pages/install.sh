@@ -30,12 +30,12 @@ Usage: install [options]
 
 Options:
     -h, --help              Display this help message
-    -v, --version <version> Install a specific version (e.g., 0.1.0)
+    -v, --version <version> Install a specific version (e.g., v0.1.0)
         --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
 
 Examples:
-    curl -fsSL https://raw.githubusercontent.com/$REPO/main/install | bash
-    curl -fsSL https://raw.githubusercontent.com/$REPO/main/install | bash -s -- --version 0.1.0
+    bash <(curl -fsSL https://www.damianb.dev/proton-drive-sync/install.sh)
+    bash <(curl -fsSL https://www.damianb.dev/proton-drive-sync/install.sh) --version v0.1.0
 EOF
 }
 
@@ -301,8 +301,13 @@ if [ -z "$requested_version" ]; then
 		exit 1
 	fi
 else
-	url="https://github.com/$REPO/releases/download/v${requested_version}/$filename"
-	specific_version=$requested_version
+	# Validate version format (must start with 'v')
+	if [[ ! "$requested_version" =~ ^v[0-9] ]]; then
+		echo -e "${RED}Error: Version must start with 'v' (e.g., v0.1.0)${NC}"
+		exit 1
+	fi
+	url="https://github.com/$REPO/releases/download/${requested_version}/$filename"
+	specific_version=${requested_version#v}
 fi
 
 print_message() {

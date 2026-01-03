@@ -57,3 +57,13 @@ git push origin v0.1.0
 ```
 
 The GitHub Actions release workflow will automatically build binaries for macOS (arm64 and x64) and create a GitHub release.
+
+## Installing Pre-release Versions
+
+To install a pre-release candidate (e.g., `v0.1.4-rc.1`):
+
+```bash
+bash <(curl -fsSL https://www.damianb.dev/proton-drive-sync/install.sh) --version v0.1.4-rc.1
+```
+
+The version must include the `v` prefix and match an existing GitHub release tag.

@@ -153,6 +153,11 @@ Write-Step "Installing Proton Drive Sync..."
 try {
     # Get release (specific version or latest)
     if ($Version) {
+        # Validate version format (must start with 'v')
+        if ($Version -notmatch '^v[0-9]') {
+            Write-Host "Error: Version must start with 'v' (e.g., v0.1.0)" -ForegroundColor Red
+            exit 1
+        }
         $releaseUrl = "https://api.github.com/repos/$REPO/releases/tags/$Version"
         Write-Host "  Fetching version $Version..."
     }
