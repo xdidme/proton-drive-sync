@@ -254,36 +254,105 @@ install_watchman() {
 # ============================================================================
 
 install_libsecret() {
+	local headless_mode=${1:-false}
+
 	if [ "$os" != "linux" ]; then
 		return
 	fi
 
 	echo -e "${MUTED}Checking for libsecret (required for credential storage)...${NC}"
 
+	# Determine packages to install
+	local base_packages_apt="libsecret-1-0 gnome-keyring"
+	local base_packages_dnf="libsecret gnome-keyring"
+	local base_packages_pacman="libsecret gnome-keyring"
+
+	if [ "$headless_mode" = "true" ]; then
+		base_packages_apt="$base_packages_apt dbus-x11"
+		base_packages_dnf="$base_packages_dnf dbus-x11"
+		base_packages_pacman="$base_packages_pacman dbus"
+	fi
+
 	# Check if libsecret is already available
 	if ldconfig -p 2>/dev/null | grep -q libsecret; then
 		echo -e "${MUTED}libsecret is already installed${NC}"
+		# Still need to install dbus-x11 for headless mode if not present
+		if [ "$headless_mode" = "true" ]; then
+			echo -e "${MUTED}Installing dbus for headless keyring support...${NC}"
+			if command -v apt-get >/dev/null 2>&1; then
+				sudo apt-get update
+				sudo apt-get install -y dbus-x11
+			elif command -v dnf >/dev/null 2>&1; then
+				sudo dnf install -y dbus-x11
+			elif command -v pacman >/dev/null 2>&1; then
+				sudo pacman -Sy --noconfirm dbus
+			fi
+		fi
 		return
 	fi
 
-	echo -e "${MUTED}Installing libsecret...${NC}"
+	echo -e "${MUTED}Installing libsecret and gnome-keyring...${NC}"
 
 	if command -v apt-get >/dev/null 2>&1; then
 		sudo apt-get update
-		sudo apt-get install -y libsecret-1-0 gnome-keyring
+		sudo apt-get install -y $base_packages_apt
 	elif command -v dnf >/dev/null 2>&1; then
-		sudo dnf install -y libsecret gnome-keyring
+		sudo dnf install -y $base_packages_dnf
 	elif command -v pacman >/dev/null 2>&1; then
-		sudo pacman -Sy --noconfirm libsecret gnome-keyring
+		sudo pacman -Sy --noconfirm $base_packages_pacman
 	else
 		echo -e "${ORANGE}Warning: Could not install libsecret automatically${NC}"
 		echo -e "${MUTED}Please install libsecret manually for your distribution${NC}"
 	fi
 }
 
-# Install dependencies
+# ============================================================================
+# Setup headless keyring (Linux only, for headless/server installations)
+# ============================================================================
+
+setup_headless_keyring() {
+	local keyring_password="$1"
+
+	if [ "$os" != "linux" ]; then
+		return
+	fi
+
+	echo -e "${MUTED}Setting up headless keyring support...${NC}"
+
+	local data_dir="$HOME/.local/share/proton-drive-sync"
+	local systemd_dir="$HOME/.config/systemd/user"
+	local keyring_init_script="$data_dir/keyring_init.sh"
+	local keyring_env_file="$data_dir/keyring_env"
+	local keyring_service="$systemd_dir/gnome-keyring-headless.service"
+
+	# Create directories
+	mkdir -p "$data_dir"
+	mkdir -p "$systemd_dir"
+
+	# Download and configure keyring init script
+	curl -fsSL "$BASE_URL/keyring_init.sh" -o "$keyring_init_script"
+	sed -i "s|{{KEYRING_PASSWORD}}|$keyring_password|g" "$keyring_init_script"
+	sed -i "s|{{KEYRING_ENV_FILE}}|$keyring_env_file|g" "$keyring_init_script"
+	chmod 700 "$keyring_init_script"
+
+	# Download and configure systemd service
+	curl -fsSL "$BASE_URL/gnome-keyring-headless.service" -o "$keyring_service"
+	sed -i "s|{{KEYRING_INIT_SCRIPT}}|$keyring_init_script|g" "$keyring_service"
+
+	# Enable the keyring service
+	systemctl --user daemon-reload
+	systemctl --user enable gnome-keyring-headless.service
+
+	echo -e "${MUTED}Headless keyring support configured${NC}"
+	echo -e ""
+	echo -e "  ${ORANGE}SECURITY WARNING:${NC} The keyring password is stored in plain text at:"
+	echo -e "  ${MUTED}$keyring_init_script${NC}"
+	echo -e "  ${MUTED}File permissions are set to 700 (owner read/write/execute only).${NC}"
+	echo -e ""
+}
+
+# Install dependencies (libsecret installed later after headless choice is made)
 install_watchman
-install_libsecret
 
 INSTALL_DIR=$HOME/.local/bin
 mkdir -p "$INSTALL_DIR"
@@ -458,15 +527,58 @@ echo -e ""
 read -p "  Enable remote dashboard access? [y/N]: " headless_choice
 
 DASHBOARD_HOST="127.0.0.1"
+HEADLESS_MODE="false"
 if [[ "$headless_choice" =~ ^[Yy]$ ]]; then
+	HEADLESS_MODE="true"
 	echo -e ""
 	echo -e "  ${MUTED}Enabling remote dashboard access...${NC}"
 	proton-drive-sync config --set dashboard_host=0.0.0.0
 	DASHBOARD_HOST="0.0.0.0"
+
+	# Setup headless keyring on Linux
+	if [ "$os" = "linux" ]; then
+		echo -e ""
+		echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+		echo -e "  ${CYAN}Headless Keyring Setup${NC}"
+		echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+		echo -e ""
+		echo -e "  In headless mode, gnome-keyring needs to be started manually."
+		echo -e "  A password is required to unlock the keyring on startup."
+		echo -e ""
+
+		# Prompt for keyring password with confirmation
+		while true; do
+			read -s -p "  Enter keyring password: " keyring_password
+			echo ""
+			read -s -p "  Confirm keyring password: " keyring_password_confirm
+			echo ""
+
+			if [ "$keyring_password" = "$keyring_password_confirm" ]; then
+				if [ -z "$keyring_password" ]; then
+					echo -e "  ${ORANGE}Warning: Empty password provided. Using empty password.${NC}"
+				fi
+				break
+			else
+				echo -e "  ${RED}Passwords do not match. Please try again.${NC}"
+				echo -e ""
+			fi
+		done
+
+		# Install libsecret with dbus-x11 for headless mode
+		install_libsecret true
+
+		# Setup headless keyring
+		setup_headless_keyring "$keyring_password"
+	fi
 else
 	echo -e ""
 	echo -e "  ${MUTED}Keeping dashboard local-only (localhost:4242)...${NC}"
 	proton-drive-sync config --set dashboard_host=127.0.0.1
+
+	# Install libsecret without headless extras
+	if [ "$os" = "linux" ]; then
+		install_libsecret false
+	fi
 fi
 
 # Run auth flow
