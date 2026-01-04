@@ -476,21 +476,7 @@ else
 fi
 
 # ============================================================================
-# Authentication
-# ============================================================================
-
-echo -e ""
-echo -e "${MUTED}Starting authentication...${NC}"
-echo -e ""
-if ! proton-drive-sync auth; then
-	echo -e ""
-	echo -e "${RED}Authentication failed or was cancelled.${NC}"
-	echo -e "${MUTED}Run the install command again to retry.${NC}"
-	exit 1
-fi
-
-# ============================================================================
-# Service Installation
+# Service Installation (before auth on Linux to set up keyring)
 # ============================================================================
 
 echo -e ""
@@ -498,6 +484,8 @@ echo -e "━━━━━━━━━━━━━━━━━━━━━━━�
 echo -e "  ${CYAN}Service Installation${NC}"
 echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo -e ""
+
+SERVICE_INSTALLED=false
 
 if [ "$os" = "linux" ]; then
 	echo -e "  When should the sync service start?"
@@ -516,6 +504,7 @@ if [ "$os" = "linux" ]; then
 		echo -e "  ${MUTED}Installing user service...${NC}"
 		proton-drive-sync service install
 	fi
+	SERVICE_INSTALLED=true
 else
 	# macOS/Windows - only user scope supported
 	read -p "  Start sync service automatically on login? [Y/n]: " login_choice
@@ -524,11 +513,26 @@ else
 		echo -e ""
 		echo -e "  ${MUTED}Installing service...${NC}"
 		proton-drive-sync service install
+		SERVICE_INSTALLED=true
 	else
 		echo -e ""
 		echo -e "  ${MUTED}Skipping automatic startup.${NC}"
 		echo -e "  ${MUTED}You can enable it later with: proton-drive-sync service install${NC}"
 	fi
+fi
+
+# ============================================================================
+# Authentication
+# ============================================================================
+
+echo -e ""
+echo -e "${MUTED}Starting authentication...${NC}"
+echo -e ""
+if ! proton-drive-sync auth; then
+	echo -e ""
+	echo -e "${RED}Authentication failed or was cancelled.${NC}"
+	echo -e "${MUTED}Run the install command again to retry.${NC}"
+	exit 1
 fi
 
 # Open browser (platform-specific)
