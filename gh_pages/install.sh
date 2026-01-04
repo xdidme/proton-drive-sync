@@ -511,31 +511,58 @@ SERVICE_INSTALLED=false
 if [ "$os" = "linux" ]; then
 	echo -e "  When should the sync service start?"
 	echo -e ""
+	echo -e "    ${CYAN}0)${NC} Don't start automatically - manual start only"
 	echo -e "    ${CYAN}1)${NC} On login (user service) - runs when you log in"
 	echo -e "    ${CYAN}2)${NC} On boot (system service) - runs at system startup ${MUTED}(requires sudo)${NC}"
 	echo -e ""
-	read -p "  Choice [1/2]: " service_choice
+	read -p "  Choice [0/1/2]: " service_choice
 
 	if [ "$service_choice" = "2" ]; then
 		echo -e ""
 		echo -e "  ${MUTED}Installing system service (requires sudo)...${NC}"
-		sudo "$INSTALL_DIR/proton-drive-sync" service install --install-scope=system
-	else
+		if ! sudo "$INSTALL_DIR/proton-drive-sync" service install --install-scope=system; then
+			echo -e ""
+			echo -e "${RED}Service installation failed.${NC}"
+			exit 1
+		fi
+		SERVICE_INSTALLED=true
+	elif [ "$service_choice" = "1" ]; then
 		echo -e ""
 		echo -e "  ${MUTED}Installing user service...${NC}"
-		"$INSTALL_DIR/proton-drive-sync" service install
-	fi
-	SERVICE_INSTALLED=true
-else
-	# macOS/Windows - only user scope supported
-	if prompt_yn "  Start sync service automatically on login?" "y"; then
-		echo -e ""
-		echo -e "  ${MUTED}Installing service...${NC}"
-		"$INSTALL_DIR/proton-drive-sync" service install
+		if ! "$INSTALL_DIR/proton-drive-sync" service install; then
+			echo -e ""
+			echo -e "${RED}Service installation failed.${NC}"
+			exit 1
+		fi
 		SERVICE_INSTALLED=true
 	else
 		echo -e ""
 		echo -e "  ${MUTED}Skipping automatic startup.${NC}"
+		echo -e "  ${MUTED}You can start manually with: proton-drive-sync start${NC}"
+		echo -e "  ${MUTED}You can enable it later with: proton-drive-sync service install${NC}"
+	fi
+else
+	# macOS - only user scope supported
+	echo -e "  When should the sync service start?"
+	echo -e ""
+	echo -e "    ${CYAN}0)${NC} Don't start automatically - manual start only"
+	echo -e "    ${CYAN}1)${NC} On login - runs when you log in"
+	echo -e ""
+	read -p "  Choice [0/1]: " service_choice
+
+	if [ "$service_choice" = "1" ]; then
+		echo -e ""
+		echo -e "  ${MUTED}Installing service...${NC}"
+		if ! "$INSTALL_DIR/proton-drive-sync" service install; then
+			echo -e ""
+			echo -e "${RED}Service installation failed.${NC}"
+			exit 1
+		fi
+		SERVICE_INSTALLED=true
+	else
+		echo -e ""
+		echo -e "  ${MUTED}Skipping automatic startup.${NC}"
+		echo -e "  ${MUTED}You can start manually with: proton-drive-sync start${NC}"
 		echo -e "  ${MUTED}You can enable it later with: proton-drive-sync service install${NC}"
 	fi
 fi

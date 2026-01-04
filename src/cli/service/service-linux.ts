@@ -188,7 +188,15 @@ function createLinuxService(scope: InstallScope): ServiceOperations {
 
       // Reload systemd to pick up new service
       if (!daemonReload(scope)) {
-        logger.error('Failed to reload systemd daemon');
+        if (scope === 'user') {
+          // User services require a login session - this is expected to fail over SSH
+          logger.error('Could not reload systemd daemon (user services require a login session)');
+          logger.info('The service will start automatically on your next login.');
+          logger.info('To manage services over SSH, use system-level installation instead:');
+          logger.info('  proton-drive-sync service install --install-scope system');
+        } else {
+          logger.error('Failed to reload systemd daemon');
+        }
         return false;
       }
 
