@@ -284,6 +284,10 @@ install_linux_dependencies() {
 # Install Watchman first
 install_watchman
 
+# Install Linux dependencies (libsecret, gnome-keyring, dbus-x11, jq) before any proton-drive-sync commands
+# These are required for the binary to even start on Linux
+install_linux_dependencies
+
 INSTALL_DIR=$HOME/.local/bin
 mkdir -p "$INSTALL_DIR"
 
@@ -502,9 +506,6 @@ if [ "$os" = "linux" ]; then
 	echo -e "    ${CYAN}2)${NC} On boot (system service) - runs at system startup ${MUTED}(requires sudo)${NC}"
 	echo -e ""
 	read -p "  Choice [1/2]: " service_choice
-
-	# Install Linux dependencies (libsecret, gnome-keyring, dbus-x11)
-	install_linux_dependencies
 
 	if [ "$service_choice" = "2" ]; then
 		echo -e ""
