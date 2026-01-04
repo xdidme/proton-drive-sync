@@ -32,11 +32,16 @@ echo -e ""
 # Uninstall service files if proton-drive-sync exists
 if [[ -f "$INSTALL_DIR/$APP" ]]; then
 	echo -e "${MUTED}Removing service files...${NC}"
-	# Try user service first
-	"$INSTALL_DIR/$APP" service uninstall -y 2>/dev/null || true
-	# Try system service with sudo (needed for /etc/systemd/system/ files)
 	if [ "$os" = "linux" ]; then
-		sudo "$INSTALL_DIR/$APP" service uninstall -y 2>/dev/null || true
+		# Check if system service exists, use sudo directly if so
+		if [[ -f "/etc/systemd/system/$APP.service" ]]; then
+			sudo "$INSTALL_DIR/$APP" service uninstall -y 2>/dev/null || true
+		else
+			"$INSTALL_DIR/$APP" service uninstall -y 2>/dev/null || true
+		fi
+	else
+		# macOS - just run normally
+		"$INSTALL_DIR/$APP" service uninstall -y 2>/dev/null || true
 	fi
 fi
 
