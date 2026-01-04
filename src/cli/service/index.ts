@@ -13,6 +13,13 @@ import { logger } from '../../logger.js';
 import type { ServiceOperations, InstallScope } from './types.js';
 
 function getBinPathSafe(): string | null {
+  // First, try the current executable path (works for compiled binaries)
+  const execPath = process.execPath;
+  if (execPath && !execPath.includes('bun')) {
+    return execPath;
+  }
+
+  // Fallback to which/where for development mode
   const cmd = process.platform === 'win32' ? 'where' : 'which';
   const result = Bun.spawnSync([cmd, 'proton-drive-sync']);
   if (result.exitCode !== 0) return null;
