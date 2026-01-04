@@ -20,10 +20,19 @@ const PBKDF2_ITERATIONS = 100000;
 
 /**
  * Get the path to the encrypted credentials file based on scope.
- * System scope: /etc/proton-drive-sync/credentials.enc
- * User scope: ~/.config/proton-drive-sync/credentials.enc
+ *
+ * Priority:
+ * 1. XDG_CONFIG_HOME env var (set by systemd service to user's config dir)
+ * 2. System scope: /etc/proton-drive-sync/credentials.enc (if dir exists)
+ * 3. User scope: ~/.config/proton-drive-sync/credentials.enc
  */
 function getCredentialsPath(): string {
+  // First, check XDG_CONFIG_HOME (set by systemd service file for correct user paths)
+  const xdgConfig = process.env.XDG_CONFIG_HOME;
+  if (xdgConfig) {
+    return join(xdgConfig, 'proton-drive-sync', CREDENTIALS_FILENAME);
+  }
+
   // Check if system scope by looking for the system config directory
   const systemPath = '/etc/proton-drive-sync';
   if (existsSync(systemPath)) {
