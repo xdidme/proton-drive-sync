@@ -145,29 +145,27 @@ install_watchman_linux() {
 	machine_arch=$(uname -m)
 
 	if [[ "$machine_arch" == "aarch64" || "$machine_arch" == "arm64" ]]; then
-		# ARM64 requires Debian-based system for .deb installation
 		if ! command -v dpkg >/dev/null 2>&1; then
-			echo -e "${RED}Error: Linux ARM64 is only supported on Debian-based distributions${NC}"
-			echo -e "${MUTED}The Watchman package is provided as a .deb file${NC}"
+			echo -e "${RED}Error: Linux ARM64 requires a Debian-based OS (Ubuntu, Debian, Raspberry Pi OS)${NC}"
 			exit 1
 		fi
 
-		echo -e "${MUTED}Installing Watchman for ARM64 via .deb package...${NC}"
+		echo -e "${MUTED}Installing Watchman (ARM64 Standalone)...${NC}"
 
-		# Install dependencies first to avoid dpkg error messages
-		echo -e "${MUTED}Installing Watchman dependencies...${NC}"
-		sudo apt-get update
-		sudo apt-get install -y libgoogle-glog-dev libboost-all-dev libgflags-dev libevent-dev libdouble-conversion-dev libssl-dev libsnappy1v5 libzstd1 liblz4-1 libunwind8
+		sudo apt-get update -qq
+		sudo apt-get install -y libssl3
 
 		local tmp_dir
 		tmp_dir=$(mktemp -d)
-		local deb_url="$ASSETS_URL/watchman_2025.12.28.00_arm64.deb"
+		local deb_url="$ASSETS_URL/watchman_2025.12.29.00_arm64.deb"
 
-		curl -L -o "$tmp_dir/watchman.deb" "$deb_url"
-		sudo dpkg -i "$tmp_dir/watchman.deb"
+		echo -e "${MUTED}Downloading standalone package...${NC}"
+		curl -fsSL -o "$tmp_dir/watchman.deb" "$deb_url"
+
+		echo -e "${MUTED}Installing package...${NC}"
+		sudo apt-get install -y "$tmp_dir/watchman.deb"
 
 		rm -rf "$tmp_dir"
-
 		echo -e "${MUTED}Watchman installed successfully${NC}"
 		return
 	fi
