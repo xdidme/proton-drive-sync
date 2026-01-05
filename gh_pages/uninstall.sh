@@ -180,8 +180,8 @@ if command -v watchman >/dev/null 2>&1; then
 			# Linux ARM64: installed via .deb package
 			if [[ "$arch" == "arm64" ]]; then
 				if command -v dpkg >/dev/null 2>&1 && dpkg -l watchman >/dev/null 2>&1; then
-					echo -e "${MUTED}Removing Watchman via dpkg...${NC}"
-					sudo dpkg -r watchman
+					echo -e "${MUTED}Removing Watchman...${NC}"
+					sudo apt-get remove -y watchman
 					echo -e "${MUTED}Watchman removed.${NC}"
 				else
 					echo -e "${MUTED}Watchman package not found via dpkg.${NC}"

@@ -1012,6 +1012,7 @@ app.post('/api/config', async (c) => {
   try {
     const body = await c.req.json();
     const newConfig: Config = {
+      ...currentConfig,
       sync_dirs: body.sync_dirs || [],
       sync_concurrency: body.sync_concurrency || 1,
     };
@@ -1089,6 +1090,7 @@ app.post('/api/add-directory', async (c) => {
     // Add to config
     const newDir = { source_path: sourcePath, remote_root: remoteRoot };
     const newConfig: Config = {
+      ...currentConfig,
       sync_dirs: [...(currentConfig?.sync_dirs || []), newDir],
       sync_concurrency: currentConfig?.sync_concurrency || 8,
     };
