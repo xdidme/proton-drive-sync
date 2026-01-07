@@ -20,13 +20,13 @@ proton-drive-sync setup
 
 ### Debian / Ubuntu
 
+Download the appropriate `.deb` file for your architecture from [GitHub Releases](https://github.com/DamianB-BitFlipper/proton-drive-sync/releases).
+
 ```bash
 # For amd64:
-wget https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest/download/proton-drive-sync_amd64.deb
 sudo apt install ./proton-drive-sync_amd64.deb
 
 # For arm64:
-wget https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest/download/proton-drive-sync_arm64.deb
 sudo apt install ./proton-drive-sync_arm64.deb
 
 proton-drive-sync setup
@@ -34,13 +34,13 @@ proton-drive-sync setup
 
 ### Fedora / RHEL / CentOS
 
+Download the appropriate `.rpm` file for your architecture from [GitHub Releases](https://github.com/DamianB-BitFlipper/proton-drive-sync/releases).
+
 ```bash
 # For x86_64:
-wget https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest/download/proton-drive-sync.x86_64.rpm
 sudo dnf install ./proton-drive-sync.x86_64.rpm
 
 # For aarch64:
-wget https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest/download/proton-drive-sync.aarch64.rpm
 sudo dnf install ./proton-drive-sync.aarch64.rpm
 
 proton-drive-sync setup
