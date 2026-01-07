@@ -76,7 +76,7 @@ export const syncJobs = sqliteTable(
       .$defaultFn(() => new Date()),
     nRetries: integer('n_retries').notNull().default(0),
     lastError: text('last_error'),
-    contentHash: text('content_hash'),
+    changeToken: text('change_token'),
     oldLocalPath: text('old_local_path'),
     oldRemotePath: text('old_remote_path'),
     createdAt: integer('created_at', { mode: 'timestamp' })
@@ -101,12 +101,12 @@ export const processingQueue = sqliteTable('processing_queue', {
 });
 
 /**
- * File hashes table for tracking content hashes of synced files.
- * Used to skip uploads when content hasn't changed.
+ * File state table for tracking local file state (mtime:size).
+ * Used to detect changes and skip uploads when content hasn't changed.
  */
-export const fileHashes = sqliteTable('file_hashes', {
+export const fileState = sqliteTable('file_state', {
   localPath: text('local_path').primaryKey(),
-  contentHash: text('content_hash').notNull(),
+  changeToken: text('change_token').notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp' })
     .notNull()
     .$defaultFn(() => new Date()),

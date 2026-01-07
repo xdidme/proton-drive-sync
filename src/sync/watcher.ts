@@ -2,7 +2,7 @@
  * File Watcher (fs.watch)
  *
  * Handles file change detection using Node's built-in fs.watch with
- * fileHashes DB table for persistence and change detection.
+ * file_state DB table for persistence and change detection.
  */
 
 import { watch, type FSWatcher, statSync, existsSync } from 'fs';
@@ -11,7 +11,7 @@ import { eq, like } from 'drizzle-orm';
 import { logger } from '../logger.js';
 import { type Config } from '../config.js';
 import { db } from '../db/index.js';
-import { fileHashes } from '../db/schema.js';
+import { fileState } from '../db/schema.js';
 import {
   WATCHER_DEBOUNCE_MS,
   RECONCILIATION_INTERVAL_MS,
@@ -61,40 +61,40 @@ let reconciliationConfig: Config | null = null;
 let reconciliationCallback: FileChangeBatchHandler | null = null;
 
 // ============================================================================
-// Hash Helpers
+// Change Token Helpers
 // ============================================================================
 
 /**
- * Build a content hash from mtime and size (format: "mtime_ms:size")
+ * Build a change token from mtime and size (format: "mtime_ms:size")
  */
-function buildHash(mtime_ms: number, size: number): string {
+function buildChangeToken(mtime_ms: number, size: number): string {
   return `${mtime_ms}:${size}`;
 }
 
 /**
- * Get stored hash for a path from the database
+ * Get stored change token for a path from the database
  */
-function getStoredHash(localPath: string): string | null {
-  const result = db.select().from(fileHashes).where(eq(fileHashes.localPath, localPath)).get();
-  return result?.contentHash ?? null;
+function getStoredChangeToken(localPath: string): string | null {
+  const result = db.select().from(fileState).where(eq(fileState.localPath, localPath)).get();
+  return result?.changeToken ?? null;
 }
 
 /**
- * Get all stored hashes under a sync directory
+ * Get all stored change tokens under a sync directory
  */
-function getAllStoredHashes(syncDirPath: string): Map<string, string> {
+function getAllStoredChangeTokens(syncDirPath: string): Map<string, string> {
   const pathPrefix = syncDirPath.endsWith('/') ? syncDirPath : `${syncDirPath}/`;
   const results = db
     .select()
-    .from(fileHashes)
-    .where(like(fileHashes.localPath, `${pathPrefix}%`))
+    .from(fileState)
+    .where(like(fileState.localPath, `${pathPrefix}%`))
     .all();
 
-  const hashMap = new Map<string, string>();
+  const tokenMap = new Map<string, string>();
   for (const row of results) {
-    hashMap.set(row.localPath, row.contentHash);
+    tokenMap.set(row.localPath, row.changeToken);
   }
-  return hashMap;
+  return tokenMap;
 }
 
 // ============================================================================
@@ -141,22 +141,22 @@ export async function scanDirectory(
 }
 
 /**
- * Compare filesystem state against stored hashes and generate changes
+ * Compare filesystem state against stored change tokens and generate changes
  */
-function compareWithStoredHashes(
+function compareWithStoredChangeTokens(
   watchDir: string,
   fsState: Map<string, { size: number; mtime_ms: number; isDirectory: boolean; ino: number }>,
-  storedHashes: Map<string, string>
+  storedTokens: Map<string, string>
 ): FileChange[] {
   const changes: FileChange[] = [];
 
   // Check for new and updated files
   for (const [fullPath, stats] of fsState) {
     const relativePath = relative(watchDir, fullPath);
-    const currentHash = buildHash(stats.mtime_ms, stats.size);
-    const storedHash = storedHashes.get(fullPath);
+    const currentToken = buildChangeToken(stats.mtime_ms, stats.size);
+    const storedToken = storedTokens.get(fullPath);
 
-    if (!storedHash) {
+    if (!storedToken) {
       // New file/directory
       changes.push({
         name: relativePath,
@@ -168,7 +168,7 @@ function compareWithStoredHashes(
         watchRoot: watchDir,
         ino: stats.ino,
       });
-    } else if (storedHash !== currentHash && !stats.isDirectory) {
+    } else if (storedToken !== currentToken && !stats.isDirectory) {
       // File updated (only track changes for files, not directories)
       changes.push({
         name: relativePath,
@@ -184,7 +184,7 @@ function compareWithStoredHashes(
   }
 
   // Check for deleted files (in DB but not on filesystem)
-  for (const [storedPath] of storedHashes) {
+  for (const [storedPath] of storedTokens) {
     if (!fsState.has(storedPath)) {
       const relativePath = relative(watchDir, storedPath);
       changes.push({
@@ -222,13 +222,13 @@ export async function closeWatcher(): Promise<void> {
 }
 
 /**
- * Clear all stored file hashes (used by reset command to force full resync)
- * Returns the number of hashes cleared
+ * Clear all stored file state (used by reset command to force full resync)
+ * Returns the number of entries cleared
  */
 export function clearAllSnapshots(): number {
-  const result = db.select().from(fileHashes).all();
+  const result = db.select().from(fileState).all();
   const count = result.length;
-  db.delete(fileHashes).run();
+  db.delete(fileState).run();
   return count;
 }
 
@@ -238,7 +238,7 @@ export function clearAllSnapshots(): number {
 
 /**
  * Query all configured directories for changes since last sync.
- * Compares filesystem state against fileHashes table.
+ * Compares filesystem state against file_state table.
  */
 export async function queryAllChanges(
   config: Config,
@@ -254,9 +254,9 @@ export async function queryAllChanges(
       continue;
     }
 
-    // Get stored hashes for this sync directory
-    const storedHashes = getAllStoredHashes(watchDir);
-    const hasStoredState = storedHashes.size > 0;
+    // Get stored change tokens for this sync directory
+    const storedTokens = getAllStoredChangeTokens(watchDir);
+    const hasStoredState = storedTokens.size > 0;
 
     if (hasStoredState) {
       logger.info(`Syncing changes since last run for ${dir.source_path}...`);
@@ -268,7 +268,7 @@ export async function queryAllChanges(
     const fsState = await scanDirectory(watchDir);
 
     // Compare and generate changes
-    const changes = compareWithStoredHashes(watchDir, fsState, storedHashes);
+    const changes = compareWithStoredChangeTokens(watchDir, fsState, storedTokens);
 
     if (changes.length > 0) {
       onFileChangeBatch(changes);
@@ -303,11 +303,11 @@ function handleDebouncedEvent(
     if (existsSync(fullPath)) {
       // File exists - it's either a create or update
       const stats = statSync(fullPath);
-      const currentHash = buildHash(stats.mtimeMs, stats.size);
-      const storedHash = getStoredHash(fullPath);
+      const currentToken = buildChangeToken(stats.mtimeMs, stats.size);
+      const storedToken = getStoredChangeToken(fullPath);
 
-      const isNew = !storedHash;
-      const isChanged = storedHash && storedHash !== currentHash;
+      const isNew = !storedToken;
+      const isChanged = storedToken && storedToken !== currentToken;
 
       // Skip if file hasn't actually changed
       if (!isNew && !isChanged) {
@@ -525,16 +525,16 @@ function runIncrementalReconciliation(): void {
   for (const [watchDir, paths] of pathsByRoot) {
     for (const fullPath of paths) {
       const relativePath = relative(watchDir, fullPath);
-      const storedHash = getStoredHash(fullPath);
+      const storedToken = getStoredChangeToken(fullPath);
 
       try {
         if (existsSync(fullPath)) {
           const stats = statSync(fullPath);
-          const currentHash = buildHash(stats.mtimeMs, stats.size);
+          const currentToken = buildChangeToken(stats.mtimeMs, stats.size);
 
           // Check if there's a discrepancy
-          if (!storedHash) {
-            // File exists but no hash stored - should have been created
+          if (!storedToken) {
+            // File exists but no change token stored - should have been created
             changes.push({
               name: relativePath,
               size: stats.size,
@@ -545,8 +545,8 @@ function runIncrementalReconciliation(): void {
               watchRoot: watchDir,
               ino: stats.ino,
             });
-          } else if (storedHash !== currentHash && !stats.isDirectory()) {
-            // Hash mismatch - should have been updated
+          } else if (storedToken !== currentToken && !stats.isDirectory()) {
+            // Token mismatch - should have been updated
             changes.push({
               name: relativePath,
               size: stats.size,
@@ -558,8 +558,8 @@ function runIncrementalReconciliation(): void {
               ino: stats.ino,
             });
           }
-        } else if (storedHash) {
-          // File doesn't exist but hash is stored - should have been deleted
+        } else if (storedToken) {
+          // File doesn't exist but change token is stored - should have been deleted
           changes.push({
             name: relativePath,
             size: 0,
@@ -615,14 +615,14 @@ export async function triggerFullReconciliation(
       continue;
     }
 
-    // Get stored hashes for this sync directory
-    const storedHashes = getAllStoredHashes(watchDir);
+    // Get stored change tokens for this sync directory
+    const storedTokens = getAllStoredChangeTokens(watchDir);
 
     // Scan the filesystem
     const fsState = await scanDirectory(watchDir);
 
     // Compare and generate changes
-    const changes = compareWithStoredHashes(watchDir, fsState, storedHashes);
+    const changes = compareWithStoredChangeTokens(watchDir, fsState, storedTokens);
 
     if (changes.length > 0) {
       onFileChangeBatch(changes);

@@ -51,14 +51,14 @@ export async function resetCommand(options: {
     db.transaction((tx) => {
       tx.delete(schema.syncJobs).run();
       tx.delete(schema.processingQueue).run();
-      tx.delete(schema.fileHashes).run();
+      tx.delete(schema.fileState).run();
       tx.delete(schema.nodeMapping).run();
     });
 
-    // Clear file hashes to force full resync
+    // Clear file state to force full resync
     const snapshotsCleared = clearAllSnapshots();
     if (snapshotsCleared > 0) {
-      logger.info(`Cleared ${snapshotsCleared} file hash(es).`);
+      logger.info(`Cleared ${snapshotsCleared} file state entry(ies).`);
     }
 
     logger.info('State reset.');

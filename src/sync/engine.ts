@@ -32,11 +32,11 @@ import {
   setSyncConcurrency,
 } from './processor.js';
 import {
-  getStoredHash,
-  deleteStoredHash,
-  deleteStoredHashesUnderPath,
-  cleanupOrphanedHashes,
-} from './hashes.js';
+  getChangeToken,
+  deleteChangeToken,
+  deleteChangeTokensUnderPath,
+  cleanupOrphanedChangeTokens,
+} from './fileState.js';
 import {
   getNodeMapping,
   deleteNodeMapping,
@@ -117,16 +117,16 @@ function handleFileChange(file: FileChange, config: Config, dryRun: boolean): vo
           eventType: SyncEventType.DELETE,
           localPath,
           remotePath,
-          contentHash: null,
+          changeToken: null,
         },
         dryRun,
         tx
       );
 
-      deleteStoredHash(localPath, dryRun, tx);
+      deleteChangeToken(localPath, dryRun, tx);
       deleteNodeMapping(localPath, remotePath, dryRun, tx);
       if (file.type === 'd') {
-        deleteStoredHashesUnderPath(localPath, tx);
+        deleteChangeTokensUnderPath(localPath, tx);
         deleteNodeMappingsUnderPath(localPath, remotePath, tx);
       }
     });
@@ -153,14 +153,14 @@ function handleFileChange(file: FileChange, config: Config, dryRun: boolean): vo
             eventType: SyncEventType.CREATE_DIR,
             localPath,
             remotePath,
-            contentHash: newHash,
+            changeToken: newHash,
           },
           dryRun,
           tx
         );
       } else {
         // File - check if mtime+size matches stored value
-        const storedHash = getStoredHash(localPath, tx);
+        const storedHash = getChangeToken(localPath, tx);
         if (storedHash && storedHash === newHash) {
           logger.debug(`[skip] create mtime+size unchanged: ${file.name}`);
           return;
@@ -171,7 +171,7 @@ function handleFileChange(file: FileChange, config: Config, dryRun: boolean): vo
             eventType: SyncEventType.CREATE_FILE,
             localPath,
             remotePath,
-            contentHash: newHash,
+            changeToken: newHash,
           },
           dryRun,
           tx
@@ -188,7 +188,7 @@ function handleFileChange(file: FileChange, config: Config, dryRun: boolean): vo
   }
 
   db.transaction((tx) => {
-    const storedHash = getStoredHash(localPath, tx);
+    const storedHash = getChangeToken(localPath, tx);
     if (storedHash && storedHash === newHash) {
       logger.debug(`[skip] mtime+size unchanged: ${file.name}`);
       return;
@@ -202,7 +202,7 @@ function handleFileChange(file: FileChange, config: Config, dryRun: boolean): vo
         eventType: SyncEventType.UPDATE,
         localPath,
         remotePath,
-        contentHash: newHash,
+        changeToken: newHash,
       },
       dryRun,
       tx
@@ -235,7 +235,7 @@ export async function runOneShotSync(options: SyncOptions): Promise<void> {
   db.transaction((tx) => {
     cleanupOrphanedJobs(dryRun, tx);
     cleanupOrphanedNodeMappings(tx);
-    cleanupOrphanedHashes(tx);
+    cleanupOrphanedChangeTokens(tx);
   });
 
   // Query all changes and enqueue jobs
@@ -280,7 +280,7 @@ export async function runWatchMode(options: SyncOptions): Promise<void> {
   db.transaction((tx) => {
     cleanupOrphanedJobs(dryRun, tx);
     cleanupOrphanedNodeMappings(tx);
-    cleanupOrphanedHashes(tx);
+    cleanupOrphanedChangeTokens(tx);
   });
 
   // Scan for changes that happened while we were offline
@@ -306,7 +306,7 @@ export async function runWatchMode(options: SyncOptions): Promise<void> {
     db.transaction((tx) => {
       cleanupOrphanedJobs(dryRun, tx);
       cleanupOrphanedNodeMappings(tx);
-      cleanupOrphanedHashes(tx);
+      cleanupOrphanedChangeTokens(tx);
     });
 
     // Scan for changes in all sync dirs (including newly added ones)

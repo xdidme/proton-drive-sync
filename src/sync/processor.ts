@@ -23,7 +23,7 @@ import {
   scheduleRetry,
 } from './queue.js';
 import { getNodeMapping, setNodeMapping, deleteNodeMapping } from './nodes.js';
-import { getStoredHash, setFileHash } from './hashes.js';
+import { getChangeToken, storeChangeToken } from './fileState.js';
 import { scanDirectory } from './watcher.js';
 
 // ============================================================================
@@ -206,11 +206,11 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
           dryRun
         );
         logger.info(`Success: ${remotePath} -> ${nodeUid}`);
-        // Store node mapping and content hash for future operations
+        // Store node mapping and change token for future operations
         db.transaction((tx) => {
           setNodeMapping(localPath, remotePath, nodeUid, parentNodeUid, isDirectory, dryRun, tx);
-          if (job.contentHash) {
-            setFileHash(localPath, job.contentHash, dryRun, tx);
+          if (job.changeToken) {
+            storeChangeToken(localPath, job.changeToken, dryRun, tx);
           }
           markJobSynced(id, localPath, dryRun, tx);
         });
@@ -232,8 +232,8 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
         // Step 2: Store node mapping for the directory
         db.transaction((tx) => {
           setNodeMapping(localPath, remotePath, nodeUid, parentNodeUid, true, dryRun, tx);
-          if (job.contentHash) {
-            setFileHash(localPath, job.contentHash, dryRun, tx);
+          if (job.changeToken) {
+            storeChangeToken(localPath, job.changeToken, dryRun, tx);
           }
           markJobSynced(id, localPath, dryRun, tx);
         });
@@ -263,15 +263,15 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
                   eventType: SyncEventType.CREATE_DIR,
                   localPath: childPath,
                   remotePath: childRemotePath,
-                  contentHash: childHash,
+                  changeToken: childHash,
                 },
                 dryRun,
                 tx
               );
             } else {
-              // Check if file already synced with same hash
-              const storedHash = getStoredHash(childPath, tx);
-              if (storedHash && storedHash === childHash) {
+              // Check if file already synced with same change token
+              const storedToken = getChangeToken(childPath, tx);
+              if (storedToken && storedToken === childHash) {
                 logger.debug(`[skip] child file already synced: ${basename(childPath)}`);
                 continue;
               }
@@ -282,7 +282,7 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
                   eventType: SyncEventType.CREATE_FILE,
                   localPath: childPath,
                   remotePath: childRemotePath,
-                  contentHash: childHash,
+                  changeToken: childHash,
                 },
                 dryRun,
                 tx

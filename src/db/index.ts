@@ -23,6 +23,7 @@ import migration0005 from './migrations/0005_opposite_venom.sql' with { type: 't
 import migration0006 from './migrations/0006_content_hash_tracking.sql' with { type: 'text' };
 import migration0007 from './migrations/0007_drop_clocks_table.sql' with { type: 'text' };
 import migration0008 from './migrations/0008_curvy_glorian.sql' with { type: 'text' };
+import migration0009 from './migrations/0009_rename_file_hashes.sql' with { type: 'text' };
 
 const migrations = [
   { id: '0000_hot_whizzer', sql: migration0000 },
@@ -34,6 +35,7 @@ const migrations = [
   { id: '0006_content_hash_tracking', sql: migration0006 },
   { id: '0007_drop_clocks_table', sql: migration0007 },
   { id: '0008_curvy_glorian', sql: migration0008 },
+  { id: '0009_rename_file_hashes', sql: migration0009 },
 ];
 
 // ============================================================================
