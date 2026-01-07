@@ -1,11 +1,6 @@
 import type { FC } from 'hono/jsx';
-import { Icon } from './Icon.js';
 
-interface WelcomeModalProps {
-  watchmanReady?: boolean;
-}
-
-export const WelcomeModal: FC<WelcomeModalProps> = ({ watchmanReady = false }) => {
+export const WelcomeModal: FC = () => {
   return (
     <div
       id="welcome-modal"
@@ -52,20 +47,13 @@ export const WelcomeModal: FC<WelcomeModalProps> = ({ watchmanReady = false }) =
 
         {/* Action */}
         <div class="flex justify-center">
-          {watchmanReady ? (
-            <button
-              type="button"
-              onclick="document.getElementById('welcome-modal').remove()"
-              class="px-6 py-2.5 bg-proton hover:bg-proton-dark text-white text-sm font-medium rounded-lg transition-colors"
-            >
-              Begin Onboarding
-            </button>
-          ) : (
-            <div class="flex items-center justify-center gap-3 text-gray-400">
-              <Icon name="loader-circle" class="w-5 h-5 animate-spin" />
-              <span class="text-sm">Waiting for Watchman to start...</span>
-            </div>
-          )}
+          <button
+            type="button"
+            onclick="document.getElementById('welcome-modal').remove()"
+            class="px-6 py-2.5 bg-proton hover:bg-proton-dark text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            Begin Onboarding
+          </button>
         </div>
       </div>
     </div>

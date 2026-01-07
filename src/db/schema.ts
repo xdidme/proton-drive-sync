@@ -35,14 +35,6 @@ export type SyncEventType = (typeof SyncEventType)[keyof typeof SyncEventType];
 // ============================================================================
 
 /**
- * Clocks table for storing per-directory watchman clocks.
- */
-export const clocks = sqliteTable('clocks', {
-  directory: text('directory').primaryKey(),
-  clock: text('clock').notNull(),
-});
-
-/**
  * Signals table for inter-process communication queue (transient).
  */
 export const signals = sqliteTable('signals', {

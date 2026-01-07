@@ -50,6 +50,13 @@
       "when": 1766509400000,
       "tag": "0006_content_hash_tracking",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1767830400000,
+      "tag": "0007_drop_clocks_table",
+      "breakpoints": true
     }
   ]
 }

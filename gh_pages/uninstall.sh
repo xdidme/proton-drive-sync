@@ -163,51 +163,6 @@ if [[ -d "$CONFIG_DIR" ]] || [[ -d "$STATE_DIR" ]]; then
 	echo -e ""
 fi
 
-# Prompt user about Watchman
-if command -v watchman >/dev/null 2>&1; then
-	echo -e "${MUTED}Watchman is still installed on your system.${NC}"
-	if prompt_yn "Would you like to remove Watchman as well?" "y"; then
-		if [ "$os" = "darwin" ]; then
-			# macOS: use Homebrew
-			if command -v brew >/dev/null 2>&1; then
-				echo -e "${MUTED}Removing Watchman via Homebrew...${NC}"
-				brew uninstall watchman
-				echo -e "${MUTED}Watchman removed.${NC}"
-			else
-				echo -e "${RED}Homebrew not found. Please remove Watchman manually.${NC}"
-			fi
-		elif [ "$os" = "linux" ]; then
-			# Linux ARM64: installed via .deb package
-			if [[ "$arch" == "arm64" ]]; then
-				if command -v dpkg >/dev/null 2>&1 && dpkg -l watchman >/dev/null 2>&1; then
-					echo -e "${MUTED}Removing Watchman...${NC}"
-					sudo apt-get remove -y watchman
-					echo -e "${MUTED}Watchman removed.${NC}"
-				else
-					echo -e "${MUTED}Watchman package not found via dpkg.${NC}"
-					echo -e "${MUTED}It may have been installed manually or via a different method.${NC}"
-				fi
-			# Linux x64: installed to /opt/watchman with wrapper in /usr/local/bin
-			elif [[ -d "/opt/watchman" ]] || [[ -f "/usr/local/bin/watchman" ]]; then
-				echo -e "${MUTED}Removing Watchman...${NC}"
-				# Remove the wrapper script
-				[[ -f "/usr/local/bin/watchman" ]] && sudo rm -f /usr/local/bin/watchman
-				# Remove the main installation directory
-				[[ -d "/opt/watchman" ]] && sudo rm -rf /opt/watchman
-				# Remove the runtime directory
-				[[ -d "/usr/local/var/run/watchman" ]] && sudo rm -rf /usr/local/var/run/watchman
-				echo -e "${MUTED}Watchman removed.${NC}"
-			else
-				echo -e "${MUTED}Watchman installation not found in expected locations.${NC}"
-				echo -e "${MUTED}It may have been installed via a package manager.${NC}"
-				echo -e "${MUTED}Try: sudo apt remove watchman, sudo dnf remove watchman, or sudo pacman -R watchman${NC}"
-			fi
-		else
-			echo -e "${RED}Unknown OS. Please remove Watchman manually.${NC}"
-		fi
-	fi
-fi
-
 # Note about Linux packages
 if [ "$os" = "linux" ]; then
 	echo -e ""

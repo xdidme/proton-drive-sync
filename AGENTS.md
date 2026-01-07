@@ -4,13 +4,13 @@ This file provides guidance for AI coding agents working in this repository.
 
 ## Project Overview
 
-Proton Drive Sync is a macOS CLI tool that syncs local directories to Proton Drive cloud storage. Built with Bun/TypeScript, it uses Watchman for file system monitoring, SQLite (via Drizzle ORM) for state management, and the Proton Drive SDK for cloud operations.
+Proton Drive Sync is a macOS CLI tool that syncs local directories to Proton Drive cloud storage. Built with Bun/TypeScript, it uses @parcel/watcher for file system monitoring, SQLite (via Drizzle ORM) for state management, and the Proton Drive SDK for cloud operations.
 
 ## Build & Run Commands
 
 | Command                   | Description                                           |
 | ------------------------- | ----------------------------------------------------- |
-| `make install`            | Install dependencies (requires Watchman on system)    |
+| `make install`            | Install dependencies                                  |
 | `make build`              | Compile standalone binary to `dist/proton-drive-sync` |
 | `make build-check`        | Type-check without emitting files                     |
 | `make run ARGS="<cmd>"`   | Run one-off command (e.g., `make run ARGS="status"`)  |
@@ -187,7 +187,7 @@ const SHUTDOWN_TIMEOUT_MS = 2_000;
 - **Sync Engine** (`src/sync/engine.ts`): Orchestrates watcher, queue, processor
 - **Queue** (`src/sync/queue.ts`): SQLite-backed job queue with retry logic
 - **Processor** (`src/sync/processor.ts`): Executes sync jobs with concurrency control
-- **Watcher** (`src/sync/watcher.ts`): Watchman integration for file changes
+- **Watcher** (`src/sync/watcher.ts`): @parcel/watcher integration for file changes
 - **Proton API** (`src/proton/`): Wrapper around @protontech/drive-sdk
 
 ### Inter-process Communication

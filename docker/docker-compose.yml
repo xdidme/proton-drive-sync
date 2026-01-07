@@ -23,7 +23,7 @@ services:
     ports:
       - '${DASHBOARD_PORT:-4242}:4242'
 
-    # Required for Watchman inotify file watching
+    # Required for @parcel/watcher inotify file watching
     sysctls:
       - fs.inotify.max_user_watches=524288
       - fs.inotify.max_user_instances=512

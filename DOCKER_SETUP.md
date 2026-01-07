@@ -191,18 +191,6 @@ mkdir -p /path/to/sync/dir
 chmod -R 755 /path/to/sync/dir
 ```
 
-### Watchman errors
-
-The app automatically starts Watchman when needed. If you see Watchman-related errors:
-
-```bash
-# Check Watchman status inside container
-docker exec proton-drive-sync watchman version
-
-# View Watchman logs
-docker exec proton-drive-sync cat /state/proton-drive-sync/watchman.log
-```
-
 ### Reset everything
 
 To start fresh, remove the volumes:
@@ -217,7 +205,7 @@ This removes all configuration, credentials, and sync state. You'll need to re-a
 
 The container runs a single process that manages:
 
-1. **Watchman** - File system monitoring (auto-started by the app)
+1. **File Watcher** - Native file system monitoring via @parcel/watcher
 2. **Sync Engine** - Queues and processes file changes
 3. **Dashboard** - Web UI on port 4242
 

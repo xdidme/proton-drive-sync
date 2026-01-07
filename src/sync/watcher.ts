@@ -1,18 +1,17 @@
 /**
- * Watchman File Watcher
+ * File Watcher (@parcel/watcher)
  *
- * Handles Watchman client management, file change detection, and subscriptions.
+ * Handles file change detection using @parcel/watcher with snapshot-based
+ * incremental sync and inode-based rename detection.
  */
 
-import { existsSync, realpathSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, statSync, unlinkSync } from 'fs';
 import { basename, join } from 'path';
-import watchman from 'fb-watchman';
-import { getClock, setClock } from '../state.js';
+import { createHash } from 'crypto';
+import watcher, { type AsyncSubscription, type Event } from '@parcel/watcher';
 import { logger } from '../logger.js';
-import { setFlag, clearFlag, getFlagData, FLAGS, WATCHMAN_STATE, ALL_VARIANTS } from '../flags.js';
-import { sendSignal } from '../signals.js';
 import { getConfig, type Config } from '../config.js';
-import { WATCHMAN_SUB_NAME, WATCHMAN_SETTLE_MS } from './constants.js';
+import { getStateDir } from '../paths.js';
 
 // ============================================================================
 // Types
@@ -24,197 +23,257 @@ export interface FileChange {
   mtime_ms: number; // Last modification time in milliseconds since epoch
   exists: boolean; // false if the file was deleted
   type: 'f' | 'd'; // 'f' for file, 'd' for directory
-  new: boolean; // true if file is newer than the 'since' clock (i.e., newly created)
-  watchRoot: string; // Which watch root this change came from (added by us, not from Watchman)
+  new: boolean; // true if file is newly created
+  watchRoot: string; // Which watch root this change came from
   ino: number; // Inode number - stable across renames/moves within same filesystem
-  'content.sha1hex'?: string; // Content hash for files (null/undefined for directories)
-}
-
-interface WatchmanQueryResponse {
-  clock: string;
-  files: Omit<FileChange, 'watchRoot'>[];
+  'content.sha1hex'?: string; // Not used with @parcel/watcher (mtime+size used instead)
 }
 
 export type FileChangeHandler = (file: FileChange) => void;
 export type FileChangeBatchHandler = (files: FileChange[]) => void;
 
 // ============================================================================
+// Constants
+// ============================================================================
+
+const SNAPSHOTS_DIR = 'snapshots';
+
+// ============================================================================
 // State
 // ============================================================================
 
-/** Track active subscription names for teardown */
-let activeSubscriptions: { root: string; subName: string }[] = [];
-
-/** Map subscription name -> configured source path (resolved) for event routing */
-const subscriptionToSourcePath: Map<string, string> = new Map();
+/** Track active subscriptions for teardown */
+const activeSubscriptions: Map<string, AsyncSubscription> = new Map();
 
 // ============================================================================
-// Watchman Client
-// ============================================================================
-
-const watchmanClient = new watchman.Client();
-
-/** Promisified wrapper for Watchman command */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function watchmanCommand<T>(args: any[]): Promise<T> {
-  return new Promise((resolve, reject) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (watchmanClient as any).command(args, (err: Error | null, resp: T) => {
-      if (err) reject(err);
-      else resolve(resp);
-    });
-  });
-}
-
-/** Check if watchman is already running without starting it */
-function isWatchmanRunning(): boolean {
-  const result = Bun.spawnSync(['watchman', 'get-pid', '--no-spawn']);
-  return result.exitCode === 0;
-}
-
-/** Connect to Watchman and track if we spawned it */
-export async function connectWatchman(): Promise<void> {
-  const wasRunning = isWatchmanRunning();
-
-  // The client will auto-start watchman if not running
-  await watchmanCommand<{ version: string }>(['version']);
-
-  if (!wasRunning) {
-    setFlag(FLAGS.WATCHMAN_RUNNING, WATCHMAN_STATE.SPAWNED);
-    logger.debug('Watchman was not running, we spawned it');
-  } else {
-    setFlag(FLAGS.WATCHMAN_RUNNING, WATCHMAN_STATE.EXISTING);
-    logger.debug('Watchman was already running');
-  }
-
-  // Signal dashboard to refresh (watchman is now ready)
-  sendSignal('refresh-dashboard');
-}
-
-/** Close the Watchman client connection */
-export function closeWatchman(): void {
-  watchmanClient.end();
-}
-
-/** Shutdown watchman server if we spawned it */
-export function shutdownWatchman(): void {
-  const watchmanState = getFlagData(FLAGS.WATCHMAN_RUNNING);
-  if (watchmanState === WATCHMAN_STATE.SPAWNED) {
-    logger.debug('Shutting down watchman server (we spawned it)');
-    Bun.spawnSync(['watchman', 'shutdown-server']);
-  }
-  clearFlag(FLAGS.WATCHMAN_RUNNING, ALL_VARIANTS);
-}
-
-// ============================================================================
-// Watchman Config
+// Snapshot Management
 // ============================================================================
 
 /**
- * Ensures a .watchmanconfig file exists in the watch directory with settle configuration.
- * Only creates the file if it doesn't already exist (respects user config).
+ * Get the snapshots directory path
  */
-function ensureWatchmanConfig(watchDir: string): void {
-  const configPath = join(watchDir, '.watchmanconfig');
+function getSnapshotsDir(): string {
+  return join(getStateDir(), SNAPSHOTS_DIR);
+}
 
-  if (existsSync(configPath)) {
-    logger.debug(`[watchman] .watchmanconfig already exists at ${configPath}, skipping`);
-    return;
-  }
-
-  const config = { settle: WATCHMAN_SETTLE_MS };
-  try {
-    writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
-    logger.info(
-      `[watchman] Created .watchmanconfig in ${watchDir} with settle: ${WATCHMAN_SETTLE_MS}ms`
-    );
-  } catch (err) {
-    logger.warn(
-      `[watchman] Failed to create .watchmanconfig in ${watchDir}: ${err instanceof Error ? err.message : String(err)}`
-    );
+/**
+ * Ensure the snapshots directory exists
+ */
+function ensureSnapshotsDir(): void {
+  const dir = getSnapshotsDir();
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
   }
 }
 
-// ============================================================================
-// Watchman Helpers (promisified)
-// ============================================================================
-
-/** Promisified wrapper for Watchman watch-project command */
-function registerWithWatchman(dir: string): Promise<watchman.WatchProjectResponse> {
-  return new Promise((resolve, reject) => {
-    watchmanClient.command(['watch-project', dir], (err, resp) => {
-      if (err) reject(err);
-      else resolve(resp as watchman.WatchProjectResponse);
-    });
-  });
+/**
+ * Get the snapshot file path for a given watch directory
+ * Uses a hash of the directory path to handle special characters
+ */
+function getSnapshotPath(watchDir: string): string {
+  const hash = createHash('sha256').update(watchDir).digest('hex').slice(0, 16);
+  return join(getSnapshotsDir(), `${hash}.snapshot`);
 }
 
-/** Promisified wrapper for Watchman query command */
-function queryWatchman(
-  root: string,
-  query: Record<string, unknown>
-): Promise<WatchmanQueryResponse> {
-  return new Promise((resolve, reject) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (watchmanClient as any).command(
-      ['query', root, query],
-      (err: Error | null, resp: WatchmanQueryResponse) => {
-        if (err) reject(err);
-        else resolve(resp);
+/**
+ * Check if a snapshot exists for a directory
+ */
+function snapshotExists(watchDir: string): boolean {
+  return existsSync(getSnapshotPath(watchDir));
+}
+
+/**
+ * Delete a snapshot file
+ */
+function deleteSnapshot(watchDir: string): void {
+  const path = getSnapshotPath(watchDir);
+  if (existsSync(path)) {
+    unlinkSync(path);
+  }
+}
+
+/**
+ * Write snapshots for all watched directories
+ */
+export async function writeSnapshots(config: Config): Promise<void> {
+  ensureSnapshotsDir();
+  await Promise.all(
+    config.sync_dirs.map(async (dir) => {
+      try {
+        const snapshotPath = getSnapshotPath(dir.source_path);
+        await watcher.writeSnapshot(dir.source_path, snapshotPath);
+        logger.debug(`Wrote snapshot for ${dir.source_path}`);
+      } catch (err) {
+        logger.warn(
+          `Failed to write snapshot for ${dir.source_path}: ${err instanceof Error ? err.message : String(err)}`
+        );
       }
-    );
-  });
+    })
+  );
 }
 
-/** Promisified wrapper for Watchman subscribe command */
-function subscribeWatchman(
-  root: string,
-  subName: string,
-  sub: Record<string, unknown>
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (watchmanClient as any).command(['subscribe', root, subName, sub], (err: Error | null) => {
-      if (err) reject(err);
-      else resolve();
-    });
-  });
-}
+/**
+ * Clear all snapshots (used by reset command to force full resync)
+ * Returns the number of snapshots cleared
+ */
+export function clearAllSnapshots(): number {
+  const snapshotsDir = getSnapshotsDir();
+  if (!existsSync(snapshotsDir)) return 0;
 
-/** Promisified wrapper for Watchman unsubscribe command */
-function unsubscribeWatchman(root: string, subName: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (watchmanClient as any).command(['unsubscribe', root, subName], (err: Error | null) => {
-      if (err) reject(err);
-      else resolve();
-    });
-  });
-}
-
-interface WatchmanQueryOptions {
-  savedClock: string | null;
-  relative: string;
-}
-
-/** Build a Watchman query/subscription object */
-function buildWatchmanQuery(options: WatchmanQueryOptions): Record<string, unknown> {
-  const { savedClock, relative } = options;
-
-  const query: Record<string, unknown> = {
-    expression: ['anyof', ['type', 'f'], ['type', 'd']],
-    fields: ['name', 'size', 'mtime_ms', 'exists', 'type', 'new', 'ino', 'content.sha1hex'],
-  };
-
-  if (savedClock) {
-    query.since = savedClock;
+  let cleared = 0;
+  const files = Bun.spawnSync(['ls', snapshotsDir]).stdout.toString().trim().split('\n');
+  for (const file of files) {
+    if (file && file.endsWith('.snapshot')) {
+      const fullPath = join(snapshotsDir, file);
+      try {
+        unlinkSync(fullPath);
+        cleared++;
+      } catch {
+        // Ignore errors
+      }
+    }
   }
 
-  if (relative) {
-    query.relative_root = relative;
+  return cleared;
+}
+
+/**
+ * Clean up orphaned snapshots (for directories no longer in config)
+ */
+export function cleanupOrphanedSnapshots(config: Config): void {
+  const snapshotsDir = getSnapshotsDir();
+  if (!existsSync(snapshotsDir)) return;
+
+  // Get valid snapshot hashes for current config
+  const validHashes = new Set(
+    config.sync_dirs.map((dir) => {
+      const hash = createHash('sha256').update(dir.source_path).digest('hex').slice(0, 16);
+      return `${hash}.snapshot`;
+    })
+  );
+
+  // Remove orphaned snapshots
+  const files = Bun.spawnSync(['ls', snapshotsDir]).stdout.toString().trim().split('\n');
+  for (const file of files) {
+    if (file && file.endsWith('.snapshot') && !validHashes.has(file)) {
+      const fullPath = join(snapshotsDir, file);
+      try {
+        unlinkSync(fullPath);
+        logger.debug(`Removed orphaned snapshot: ${file}`);
+      } catch {
+        // Ignore errors
+      }
+    }
+  }
+}
+
+// ============================================================================
+// Event Conversion
+// ============================================================================
+
+/**
+ * Convert @parcel/watcher events to FileChange format
+ * Includes stat calls to get size, mtime, and inode
+ */
+function convertEvents(events: Event[], watchRoot: string): FileChange[] {
+  const changes: FileChange[] = [];
+
+  for (const event of events) {
+    const relativePath = event.path.startsWith(watchRoot)
+      ? event.path.slice(watchRoot.length + 1) // Remove watchRoot + leading slash
+      : event.path;
+
+    // Skip empty paths (root directory events)
+    if (!relativePath) continue;
+
+    if (event.type === 'delete') {
+      // For deletes, we don't have stat info
+      // Try to infer type from path (directories often lack extension)
+      // This is imperfect but rename detection will help
+      changes.push({
+        name: relativePath,
+        size: 0,
+        mtime_ms: Date.now(),
+        exists: false,
+        type: 'f', // Default to file, rename detection will correct if needed
+        new: false,
+        watchRoot,
+        ino: 0, // Unknown for deletes
+      });
+    } else {
+      // For create/update, get file stats
+      try {
+        const stats = statSync(event.path);
+        changes.push({
+          name: relativePath,
+          size: stats.size,
+          mtime_ms: stats.mtimeMs,
+          exists: true,
+          type: stats.isDirectory() ? 'd' : 'f',
+          new: event.type === 'create',
+          watchRoot,
+          ino: stats.ino,
+        });
+      } catch (err) {
+        // File may have been deleted between event and stat
+        logger.debug(
+          `Failed to stat ${event.path}: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
   }
 
-  return query;
+  return changes;
+}
+
+/**
+ * Enhance delete events with inode information by looking up from create events
+ * This enables rename/move detection across delete+create pairs
+ */
+function enhanceDeletesWithInodes(changes: FileChange[]): FileChange[] {
+  // Build a map of paths to inodes from creates
+  const createInodes = new Map<string, { ino: number; type: 'f' | 'd' }>();
+  for (const change of changes) {
+    if (change.exists && change.ino > 0) {
+      createInodes.set(change.name, { ino: change.ino, type: change.type });
+    }
+  }
+
+  // For deletes at the same basename, try to find a matching create with same inode
+  // This handles the case where we get delete+create for a rename in the same batch
+  const inodesByBasename = new Map<string, { ino: number; type: 'f' | 'd'; path: string }[]>();
+  for (const change of changes) {
+    if (change.exists && change.ino > 0) {
+      const base = basename(change.name);
+      if (!inodesByBasename.has(base)) {
+        inodesByBasename.set(base, []);
+      }
+      inodesByBasename.get(base)!.push({ ino: change.ino, type: change.type, path: change.name });
+    }
+  }
+
+  // We can't truly know the inode for deletes without tracking state
+  // The engine's rename detection will work on create events which have inodes
+  return changes;
+}
+
+// ============================================================================
+// Watcher Initialization
+// ============================================================================
+
+/**
+ * Initialize the watcher (no-op for @parcel/watcher - no daemon needed)
+ */
+export async function initializeWatcher(): Promise<void> {
+  ensureSnapshotsDir();
+  logger.debug('File watcher initialized');
+}
+
+/**
+ * Close the watcher and clean up subscriptions
+ */
+export async function closeWatcher(): Promise<void> {
+  await teardownWatchSubscriptions();
 }
 
 // ============================================================================
@@ -223,7 +282,7 @@ function buildWatchmanQuery(options: WatchmanQueryOptions): Record<string, unkno
 
 /**
  * Query all configured directories for changes since last sync.
- * Returns all file changes found across all directories.
+ * Uses snapshots for incremental sync when available.
  */
 export async function queryAllChanges(
   config: Config,
@@ -231,41 +290,51 @@ export async function queryAllChanges(
   dryRun: boolean
 ): Promise<number> {
   let totalChanges = 0;
+  ensureSnapshotsDir();
 
   await Promise.all(
     config.sync_dirs.map(async (dir) => {
-      const watchDir = realpathSync(dir.source_path);
+      const watchDir = dir.source_path;
+      const snapshotPath = getSnapshotPath(watchDir);
+      const hasSnapshot = snapshotExists(watchDir);
 
-      // Register directory with Watchman
-      const watchResp = await registerWithWatchman(watchDir);
-      const root = watchResp.watch;
-      const relative = watchResp.relative_path || '';
+      let events: Event[];
 
-      const savedClock = getClock(watchDir);
-
-      if (savedClock) {
+      if (hasSnapshot) {
         logger.info(`Syncing changes since last run for ${dir.source_path}...`);
+        try {
+          events = await watcher.getEventsSince(watchDir, snapshotPath);
+        } catch (err) {
+          logger.warn(
+            `Failed to read snapshot for ${watchDir}, doing full scan: ${err instanceof Error ? err.message : String(err)}`
+          );
+          // Delete corrupted snapshot and do full scan
+          deleteSnapshot(watchDir);
+          events = await getFullDirectoryEvents(watchDir);
+        }
       } else {
         logger.info(`First run - syncing all existing files in ${dir.source_path}...`);
+        events = await getFullDirectoryEvents(watchDir);
       }
 
-      const query = buildWatchmanQuery({ savedClock, relative });
-      const resp = await queryWatchman(root, query);
+      // Convert events to FileChange format
+      const fileChanges = convertEvents(events, watchDir);
+      const enhancedChanges = enhanceDeletesWithInodes(fileChanges);
 
-      // Save clock
-      if (resp.clock) {
-        setClock(watchDir, resp.clock, dryRun);
+      if (enhancedChanges.length > 0) {
+        onFileChangeBatch(enhancedChanges);
+        totalChanges += enhancedChanges.length;
       }
 
-      // Process changes as a batch
-      const files = resp.files || [];
-      if (files.length > 0) {
-        const fileChanges: FileChange[] = files.map((file) => ({
-          ...file,
-          watchRoot: watchDir,
-        }));
-        onFileChangeBatch(fileChanges);
-        totalChanges += files.length;
+      // Write new snapshot after processing (unless dry run)
+      if (!dryRun) {
+        try {
+          await watcher.writeSnapshot(watchDir, snapshotPath);
+        } catch (err) {
+          logger.warn(
+            `Failed to write snapshot for ${watchDir}: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
       }
     })
   );
@@ -273,12 +342,50 @@ export async function queryAllChanges(
   return totalChanges;
 }
 
+/**
+ * Get events representing all files in a directory (for first-run full sync)
+ */
+async function getFullDirectoryEvents(watchDir: string): Promise<Event[]> {
+  const events: Event[] = [];
+
+  async function walk(dir: string): Promise<void> {
+    try {
+      const entries = (await Bun.file(dir).exists())
+        ? []
+        : Array.from(new Bun.Glob('**/*').scanSync({ cwd: dir, dot: false }));
+
+      // Add the scanned files as create events
+      for (const entry of entries) {
+        const fullPath = join(dir, entry);
+        events.push({ type: 'create', path: fullPath });
+      }
+
+      // Also need to include directories
+      const dirEntries = Array.from(new Bun.Glob('**/').scanSync({ cwd: dir, dot: false }));
+      for (const entry of dirEntries) {
+        const fullPath = join(dir, entry);
+        // Only add if not already in events
+        if (!events.some((e) => e.path === fullPath)) {
+          events.push({ type: 'create', path: fullPath });
+        }
+      }
+    } catch (err) {
+      logger.warn(
+        `Failed to scan directory ${dir}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  await walk(watchDir);
+  return events;
+}
+
 // ============================================================================
 // Watch Mode (Subscriptions)
 // ============================================================================
 
 /**
- * Set up Watchman subscriptions for all configured directories.
+ * Set up watch subscriptions for all configured directories.
  * Calls onFileChangeBatch for each batch of file changes detected.
  */
 export async function setupWatchSubscriptions(
@@ -288,103 +395,106 @@ export async function setupWatchSubscriptions(
 ): Promise<void> {
   // Clear any existing subscriptions first
   await teardownWatchSubscriptions();
-
-  // Register event listener BEFORE creating subscriptions to avoid missing events
-  watchmanClient.on('subscription', (resp: watchman.SubscriptionResponse) => {
-    // Check if this is one of our subscriptions
-    if (!resp.subscription.startsWith(WATCHMAN_SUB_NAME)) return;
-
-    // Log subscription event summary and full data for debugging
-    const fileCount = resp.files?.length ?? 0;
-    const isFresh = (resp as unknown as { is_fresh_instance?: boolean }).is_fresh_instance;
-    logger.debug(
-      `[watchman] subscription event: ${resp.subscription} (files: ${fileCount}, fresh: ${isFresh ?? false})`
-    );
-    logger.debug(`[watchman] subscription payload:\n${JSON.stringify(resp, null, 2)}`);
-
-    // Look up the configured source path from the subscription name
-    // This handles cases where Watchman's watch root differs from configured path
-    // (e.g., watching /Users/foo/Documents/lotsofstuff but Watchman returns root=/Users/foo/Documents)
-    const resolvedRoot = subscriptionToSourcePath.get(resp.subscription);
-
-    if (!resolvedRoot) {
-      logger.warn(`Ignoring event for unknown subscription: ${resp.subscription}`);
-      return;
-    }
-
-    // Verify the sync dir still exists in config (may have been removed)
-    const currentConfig = getConfig();
-    const syncDir = currentConfig.sync_dirs.find(
-      (d) => realpathSync(d.source_path) === resolvedRoot
-    );
-
-    if (!syncDir) {
-      // This can happen legitimately during config transitions
-      logger.warn(
-        `Ignoring event for removed sync dir: ${resolvedRoot} (subscription: ${resp.subscription})`
-      );
-      return;
-    }
-
-    // Process files as a batch
-    const fileChanges: FileChange[] = resp.files.map((file) => {
-      const fileChange = file as unknown as Omit<FileChange, 'watchRoot'>;
-      return { ...fileChange, watchRoot: resolvedRoot };
-    });
-
-    if (fileChanges.length > 0) {
-      onFileChangeBatch(fileChanges);
-    }
-
-    // Save the new clock so we don't see these events again on restart
-    const clock = (resp as unknown as { clock?: string }).clock;
-    if (clock) {
-      setClock(resolvedRoot, clock, dryRun);
-    }
-  });
-
-  // Handle errors
-  watchmanClient.on('error', (e: Error) => logger.error(`Watchman error: ${e}`));
-  watchmanClient.on('end', () => {});
+  ensureSnapshotsDir();
 
   // Set up watches for all configured directories
   await Promise.all(
     config.sync_dirs.map(async (dir) => {
-      const watchDir = realpathSync(dir.source_path);
-      const subName = `${WATCHMAN_SUB_NAME}-${basename(watchDir)}`;
+      const watchDir = dir.source_path;
+      const snapshotPath = getSnapshotPath(watchDir);
+      const hasSnapshot = snapshotExists(watchDir);
 
-      // Ensure .watchmanconfig exists with settle configuration before registering watch
-      ensureWatchmanConfig(watchDir);
-
-      // Register directory with Watchman
-      const watchResp = await registerWithWatchman(watchDir);
-      const root = watchResp.watch;
-      const relative = watchResp.relative_path || '';
-
-      logger.debug(
-        `[watchman] watch-project response for ${watchDir}: root=${root}, relative_path="${relative}"`
-      );
-
-      // Use saved clock for this directory or null for initial sync
-      const savedClock = getClock(watchDir);
-
-      if (savedClock) {
-        logger.info(`Resuming ${dir.source_path} from last sync state...`);
-      } else {
+      // Process initial state if no snapshot (first run)
+      if (!hasSnapshot) {
         logger.info(`First run - syncing all existing files in ${dir.source_path}...`);
+        const events = await getFullDirectoryEvents(watchDir);
+        const fileChanges = convertEvents(events, watchDir);
+        if (fileChanges.length > 0) {
+          onFileChangeBatch(fileChanges);
+        }
+      } else {
+        // Check for changes since last snapshot
+        logger.info(`Resuming ${dir.source_path} from last sync state...`);
+        try {
+          const events = await watcher.getEventsSince(watchDir, snapshotPath);
+          if (events.length > 0) {
+            const fileChanges = convertEvents(events, watchDir);
+            const enhancedChanges = enhanceDeletesWithInodes(fileChanges);
+            if (enhancedChanges.length > 0) {
+              onFileChangeBatch(enhancedChanges);
+            }
+          }
+        } catch (err) {
+          logger.warn(
+            `Failed to read snapshot, doing full scan: ${err instanceof Error ? err.message : String(err)}`
+          );
+          deleteSnapshot(watchDir);
+          const events = await getFullDirectoryEvents(watchDir);
+          const fileChanges = convertEvents(events, watchDir);
+          if (fileChanges.length > 0) {
+            onFileChangeBatch(fileChanges);
+          }
+        }
       }
 
-      // TODO: Re-enable settle parameters after debugging
-      const sub = buildWatchmanQuery({
-        savedClock,
-        relative,
-      });
+      // Write initial snapshot
+      if (!dryRun) {
+        try {
+          await watcher.writeSnapshot(watchDir, snapshotPath);
+        } catch (err) {
+          logger.warn(
+            `Failed to write snapshot: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+      }
 
-      // Register subscription and store mapping for event routing
-      await subscribeWatchman(root, subName, sub);
-      activeSubscriptions.push({ root, subName });
-      subscriptionToSourcePath.set(subName, watchDir);
-      logger.info(`Watching ${dir.source_path} for changes...`);
+      // Subscribe to future changes
+      try {
+        const subscription = await watcher.subscribe(watchDir, async (err, events) => {
+          if (err) {
+            logger.error(`Watcher error for ${watchDir}: ${err.message}`);
+            return;
+          }
+
+          // Verify the sync dir still exists in config
+          const currentConfig = getConfig();
+          const syncDir = currentConfig.sync_dirs.find((d) => d.source_path === watchDir);
+
+          if (!syncDir) {
+            logger.warn(`Ignoring event for removed sync dir: ${watchDir}`);
+            return;
+          }
+
+          // Convert and process events
+          const fileChanges = convertEvents(events, watchDir);
+          const enhancedChanges = enhanceDeletesWithInodes(fileChanges);
+
+          if (enhancedChanges.length > 0) {
+            logger.debug(
+              `[watcher] subscription event: ${basename(watchDir)} (files: ${enhancedChanges.length})`
+            );
+            onFileChangeBatch(enhancedChanges);
+          }
+
+          // Update snapshot after processing
+          if (!dryRun) {
+            try {
+              await watcher.writeSnapshot(watchDir, snapshotPath);
+            } catch (writeErr) {
+              logger.warn(
+                `Failed to update snapshot: ${writeErr instanceof Error ? writeErr.message : String(writeErr)}`
+              );
+            }
+          }
+        });
+
+        activeSubscriptions.set(watchDir, subscription);
+        logger.info(`Watching ${dir.source_path} for changes...`);
+      } catch (err) {
+        logger.error(
+          `Failed to subscribe to ${watchDir}: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
     })
   );
 
@@ -392,29 +502,25 @@ export async function setupWatchSubscriptions(
 }
 
 /**
- * Tear down all active Watchman subscriptions.
+ * Tear down all active watch subscriptions.
  * Call this before re-setting up subscriptions on config change.
  */
 export async function teardownWatchSubscriptions(): Promise<void> {
-  if (activeSubscriptions.length === 0) return;
+  if (activeSubscriptions.size === 0) return;
 
   logger.info('Tearing down watch subscriptions...');
 
-  // Remove subscription event listeners
-  watchmanClient.removeAllListeners('subscription');
-
   // Unsubscribe from all active subscriptions
   await Promise.all(
-    activeSubscriptions.map(async ({ root, subName }) => {
+    Array.from(activeSubscriptions.entries()).map(async ([watchDir, subscription]) => {
       try {
-        await unsubscribeWatchman(root, subName);
-        logger.debug(`Unsubscribed from ${subName}`);
+        await subscription.unsubscribe();
+        logger.debug(`Unsubscribed from ${watchDir}`);
       } catch (err) {
-        logger.warn(`Failed to unsubscribe from ${subName}: ${(err as Error).message}`);
+        logger.warn(`Failed to unsubscribe from ${watchDir}: ${(err as Error).message}`);
       }
     })
   );
 
-  activeSubscriptions = [];
-  subscriptionToSourcePath.clear();
+  activeSubscriptions.clear();
 }

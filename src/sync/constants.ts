@@ -74,13 +74,3 @@ export const MAX_RETRIES: Record<ErrorCategory, number> = {
   [ErrorCategory.NETWORK]: Infinity,
   [ErrorCategory.AUTH]: 0, // No retries - requires user re-authentication
 };
-
-// ============================================================================
-// Watchman
-// ============================================================================
-
-/** Watchman subscription name prefix */
-export const WATCHMAN_SUB_NAME = 'proton-drive-sync';
-
-/** Settle period in milliseconds - how long filesystem should be idle before dispatching */
-export const WATCHMAN_SETTLE_MS = 2000;

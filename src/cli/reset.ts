@@ -6,6 +6,7 @@ import { confirm } from '@inquirer/prompts';
 import { gt } from 'drizzle-orm';
 import { db, schema, run } from '../db/index.js';
 import { logger } from '../logger.js';
+import { clearAllSnapshots } from '../sync/watcher.js';
 
 export async function resetCommand(options: {
   yes: boolean;
@@ -48,12 +49,18 @@ export async function resetCommand(options: {
   } else {
     // Clear all sync-related tables atomically
     db.transaction((tx) => {
-      tx.delete(schema.clocks).run();
       tx.delete(schema.syncJobs).run();
       tx.delete(schema.processingQueue).run();
       tx.delete(schema.fileHashes).run();
       tx.delete(schema.nodeMapping).run();
     });
+
+    // Clear @parcel/watcher snapshots to force full resync
+    const snapshotsCleared = clearAllSnapshots();
+    if (snapshotsCleared > 0) {
+      logger.info(`Cleared ${snapshotsCleared} snapshot(s).`);
+    }
+
     logger.info('State reset.');
   }
 }

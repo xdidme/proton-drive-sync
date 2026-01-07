@@ -13,6 +13,5 @@ cleanup() {
 trap cleanup SIGTERM SIGINT
 
 # Start sync in foreground (no daemon mode)
-# The app will auto-start Watchman if needed via fb-watchman client
 echo "Starting Proton Drive Sync..."
 exec proton-drive-sync start --no-daemon "$@"

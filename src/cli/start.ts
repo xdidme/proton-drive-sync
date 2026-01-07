@@ -17,7 +17,7 @@ import {
   serviceInstallCommand,
 } from './service/index.js';
 import { startDashboardMode } from '../dashboard/app.js';
-import { runOneShotSync, runWatchMode, closeWatchman, shutdownWatchman } from '../sync/index.js';
+import { runOneShotSync, runWatchMode, closeWatcher } from '../sync/index.js';
 
 // ============================================================================
 // Types
@@ -204,8 +204,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
 
   // Set up cleanup handler
   const cleanup = async (): Promise<void> => {
-    closeWatchman();
-    shutdownWatchman();
+    closeWatcher();
     await stopDashboard();
     stopSignalListener();
     releaseRunLock();
@@ -273,7 +272,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
   if (watchMode) {
     startDashboard(config, dryRun);
 
-    // Handle refresh-dashboard signal for immediate dashboard updates (e.g., after pause toggle, watchman ready)
+    // Handle refresh-dashboard signal for immediate dashboard updates (e.g., after pause toggle)
     registerSignalHandler('refresh-dashboard', () => {
       const paused = isPaused();
       logger.info(`Updating dashboard (${paused ? 'paused' : 'resuming'})`);

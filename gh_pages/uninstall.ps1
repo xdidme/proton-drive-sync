@@ -4,7 +4,7 @@
     Uninstalls Proton Drive Sync from Windows
 
 .DESCRIPTION
-    Removes proton-drive-sync, Watchman, and optionally configuration data.
+    Removes proton-drive-sync and optionally configuration data.
 
 .EXAMPLE
     irm https://www.damianb.dev/proton-drive-sync/uninstall.ps1 | iex
@@ -108,29 +108,6 @@ if ($response -eq 'y' -or $response -eq 'Y') {
 else {
     Write-Host ""
     Write-Host "Configuration preserved at: $CONFIG_DIR" -ForegroundColor Yellow
-}
-
-# Ask about Watchman removal
-Write-Host ""
-$response = Read-Host "Would you also like to remove Watchman? (y/N)"
-
-if ($response -eq 'y' -or $response -eq 'Y') {
-    Write-Step "Removing Watchman..."
-    
-    # Check if Chocolatey is available
-    $chocoPath = Get-Command choco -ErrorAction SilentlyContinue
-    if ($chocoPath) {
-        try {
-            choco uninstall watchman -y
-            Write-Success "Watchman uninstalled via Chocolatey"
-        }
-        catch {
-            Write-Host "  Failed to uninstall Watchman via Chocolatey: $_" -ForegroundColor Yellow
-        }
-    }
-    else {
-        Write-Host "  Chocolatey not found. If Watchman was installed manually, please remove it manually." -ForegroundColor Yellow
-    }
 }
 
 Write-Host ""

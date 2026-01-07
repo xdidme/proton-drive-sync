@@ -2,11 +2,28 @@
 
 ## Requirements
 
-Run the install script first (see README) to install Watchman and other system dependencies. The install script is only needed to set up the required dependencies, so it can be exited before completion.
+- [Bun](https://bun.sh) - JavaScript runtime and package manager
+- [Watchman](https://facebook.github.io/watchman/) - Required only for `make dev` hot-reload (not needed for production)
 
-### Additional requirements
+### Installing Watchman (for development only)
 
-- [pywatchman](https://pypi.org/project/pywatchman/) (`pip install pywatchman`) - required on Linux and Windows for `make dev`
+Watchman is used by `make dev` for hot-reload during development. It is **not** required for production use.
+
+```bash
+# macOS
+brew install watchman
+
+# Linux (Ubuntu/Debian)
+sudo apt-get install watchman
+
+# Linux (from source) - see https://facebook.github.io/watchman/docs/install
+```
+
+On Linux, you may also need `pywatchman` for the `watchman-wait` command:
+
+```bash
+pip install pywatchman
+```
 
 ## Setup
 

@@ -23,15 +23,7 @@ import {
   getRetryJobs,
   retryAllNow,
 } from '../sync/queue.js';
-import {
-  FLAGS,
-  ONBOARDING_STATE,
-  setFlag,
-  clearFlag,
-  hasFlag,
-  getFlagData,
-  ALL_VARIANTS,
-} from '../flags.js';
+import { FLAGS, ONBOARDING_STATE, setFlag, clearFlag, hasFlag, getFlagData } from '../flags.js';
 import { sendSignal } from '../signals.js';
 import { logger, enableIpcLogging } from '../logger.js';
 import {
@@ -138,7 +130,6 @@ export type DashboardSnapshot = {
   syncStatus: SyncStatus;
   dryRun: boolean;
   config: Config | null;
-  watchmanReady: boolean;
 };
 
 export function snapshot(): DashboardSnapshot {
@@ -153,7 +144,6 @@ export function snapshot(): DashboardSnapshot {
     syncStatus: currentSyncStatus,
     dryRun: isDryRun,
     config: currentConfig,
-    watchmanReady: hasFlag(FLAGS.WATCHMAN_RUNNING, ALL_VARIANTS),
   };
 }
 
@@ -547,9 +537,9 @@ function renderSyncDirsHtml(dirs: Config['sync_dirs']): string {
     .join('');
 }
 
-/** Render welcome modal (entire modal with spinner or button based on watchman state) */
-function renderWelcomeModal(watchmanReady: boolean): string {
-  return WelcomeModal({ watchmanReady })!.toString();
+/** Render welcome modal */
+function renderWelcomeModal(): string {
+  return WelcomeModal({})!.toString();
 }
 
 /** Render config info HTML */
@@ -620,7 +610,7 @@ export function renderFragment(key: FragmentKey, s: DashboardSnapshot): string {
     case FRAG.configInfo:
       return renderConfigInfo(s.config);
     case FRAG.welcomeModal:
-      return renderWelcomeModal(s.watchmanReady);
+      return renderWelcomeModal();
     default:
       return '';
   }
@@ -790,8 +780,7 @@ app.get('/controls', async (c) => {
 
   // Add welcome modal during onboarding
   if (isOnboarding) {
-    const watchmanReady = hasFlag(FLAGS.WATCHMAN_RUNNING, ALL_VARIANTS);
-    content += WelcomeModal({ watchmanReady })!.toString();
+    content += WelcomeModal({})!.toString();
   }
 
   const html = await composePage(layout, content, {
@@ -880,8 +869,7 @@ app.get('/api/modal/no-sync-dirs', (c) => {
 
 // Serve welcome modal (shown during onboarding)
 app.get('/api/modal/welcome', (c) => {
-  const watchmanReady = hasFlag(FLAGS.WATCHMAN_RUNNING, ALL_VARIANTS);
-  return c.html(WelcomeModal({ watchmanReady })!.toString());
+  return c.html(WelcomeModal({})!.toString());
 });
 
 /** Set onboarded flag */
@@ -1217,7 +1205,6 @@ app.get('/api/events', async (c) => {
         syncStatus: currentSyncStatus,
         dryRun: isDryRun,
         config: currentConfig,
-        watchmanReady: hasFlag(FLAGS.WATCHMAN_RUNNING, ALL_VARIANTS),
       };
       const curProcessing = processingIds(s.processing);
 

@@ -13,14 +13,15 @@ import { registerSignalHandler } from '../signals.js';
 import { isPaused } from '../flags.js';
 import { sendStatusToDashboard } from '../dashboard/server.js';
 import { getConfig, onConfigChange } from '../config.js';
-import { cleanupOrphanedClocks } from '../state.js';
+
 import type { Config } from '../config.js';
 import type { ProtonDriveClient } from '../proton/types.js';
 import {
-  connectWatchman,
-  closeWatchman,
+  initializeWatcher,
+  closeWatcher,
   queryAllChanges,
   setupWatchSubscriptions,
+  cleanupOrphanedSnapshots,
   type FileChange,
 } from './watcher.js';
 import { enqueueJob, cleanupOrphanedJobs } from './queue.js';
@@ -160,8 +161,9 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
       // Check if we need DELETE_AND_CREATE (no mapping, or content changed for files)
       const noMapping = !nodeMapping;
       const storedHash = isFile ? getStoredHash(from.localPath, tx) : null;
-      const newHash = to['content.sha1hex'] ?? null;
-      const contentChanged = isFile && storedHash && newHash && storedHash !== newHash;
+      // Use mtime:size as change indicator (no content hashing with @parcel/watcher)
+      const newHash = `${to.mtime_ms}:${to.size}`;
+      const contentChanged = isFile && storedHash && storedHash !== newHash;
 
       if (noMapping || contentChanged) {
         const reason = noMapping ? 'no mapping' : 'content changed';
@@ -197,7 +199,7 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
           eventType,
           localPath: to.localPath,
           remotePath: to.remotePath,
-          contentHash: to['content.sha1hex'] ?? null,
+          contentHash: `${to.mtime_ms}:${to.size}`,
           oldLocalPath: from.localPath,
           oldRemotePath: from.remotePath,
         },
@@ -218,9 +220,9 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
   for (const file of deletesByIno.values()) {
     db.transaction((tx) => {
       const typeLabel = file.type === 'd' ? 'dir' : 'file';
-      logger.info(`[watchman] [delete] ${file.name} (type: ${typeLabel})`);
+      logger.info(`[watcher] [delete] ${file.name} (type: ${typeLabel})`);
       logger.debug(
-        `[watchman] [delete] ${file.name} (type: ${typeLabel}, hash: ${file['content.sha1hex'] || 'none'}, ino: ${file.ino}, size: ${file.size})`
+        `[watcher] [delete] ${file.name} (type: ${typeLabel}, ino: ${file.ino}, size: ${file.size})`
       );
 
       enqueueJob(
@@ -250,12 +252,12 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
     db.transaction((tx) => {
       const typeLabel = file.type === 'd' ? 'dir' : 'file';
 
-      // For files, check if content hash already matches stored hash (already synced)
+      // For files, check if mtime+size already matches stored value (already synced)
       if (file.type !== 'd') {
         const storedHash = getStoredHash(file.localPath, tx);
-        const newHash = file['content.sha1hex'];
+        const newHash = `${file.mtime_ms}:${file.size}`;
         if (storedHash && storedHash === newHash) {
-          logger.debug(`[skip] create hash unchanged: ${file.name}`);
+          logger.debug(`[skip] create mtime+size unchanged: ${file.name}`);
           return;
         }
       } else {
@@ -267,9 +269,9 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
         }
       }
 
-      logger.info(`[watchman] [create] ${file.name} (type: ${typeLabel})`);
+      logger.info(`[watcher] [create] ${file.name} (type: ${typeLabel})`);
       logger.debug(
-        `[watchman] [create] ${file.name} (type: ${typeLabel}, hash: ${file['content.sha1hex'] || 'none'}, ino: ${file.ino}, size: ${file.size})`
+        `[watcher] [create] ${file.name} (type: ${typeLabel}, mtime: ${file.mtime_ms}, ino: ${file.ino}, size: ${file.size})`
       );
 
       enqueueJob(
@@ -277,7 +279,7 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
           eventType: SyncEventType.CREATE,
           localPath: file.localPath,
           remotePath: file.remotePath,
-          contentHash: file['content.sha1hex'] ?? null,
+          contentHash: `${file.mtime_ms}:${file.size}`,
           oldLocalPath: null,
           oldRemotePath: null,
         },
@@ -296,21 +298,21 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
     }
 
     db.transaction((tx) => {
-      // File update - compare hash
+      // File update - compare mtime+size
       const storedHash = getStoredHash(file.localPath, tx);
-      const newHash = file['content.sha1hex'];
+      const newHash = `${file.mtime_ms}:${file.size}`;
 
       if (storedHash && storedHash === newHash) {
         // Content unchanged - skip
-        logger.debug(`[skip] hash unchanged: ${file.name}`);
+        logger.debug(`[skip] mtime+size unchanged: ${file.name}`);
         return;
       }
 
       logger.info(
-        `[watchman] [update] ${file.name} (hash: ${storedHash?.slice(0, 8) || 'none'} -> ${newHash?.slice(0, 8) || 'none'})`
+        `[watcher] [update] ${file.name} (mtime+size: ${storedHash || 'none'} -> ${newHash})`
       );
       logger.debug(
-        `[watchman] [update] ${file.name} (hash: ${storedHash || 'none'} -> ${newHash || 'none'}, ino: ${file.ino}, size: ${file.size})`
+        `[watcher] [update] ${file.name} (mtime+size: ${storedHash || 'none'} -> ${newHash}, ino: ${file.ino})`
       );
 
       enqueueJob(
@@ -318,7 +320,7 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
           eventType: SyncEventType.UPDATE,
           localPath: file.localPath,
           remotePath: file.remotePath,
-          contentHash: newHash ?? null,
+          contentHash: newHash,
           oldLocalPath: null,
           oldRemotePath: null,
         },
@@ -339,7 +341,7 @@ function handleFileChangeBatch(files: FileChange[], config: Config, dryRun: bool
 export async function runOneShotSync(options: SyncOptions): Promise<void> {
   const { config, client, dryRun } = options;
 
-  await connectWatchman();
+  await initializeWatcher();
 
   // Clean up stale/orphaned data from previous run
   db.transaction((tx) => {
@@ -366,7 +368,7 @@ export async function runOneShotSync(options: SyncOptions): Promise<void> {
   await drainQueue(client, dryRun);
   logger.info('Sync complete');
 
-  closeWatchman();
+  closeWatcher();
 }
 
 // ============================================================================
@@ -379,7 +381,7 @@ export async function runOneShotSync(options: SyncOptions): Promise<void> {
 export async function runWatchMode(options: SyncOptions): Promise<void> {
   const { config, client, dryRun } = options;
 
-  await connectWatchman();
+  await initializeWatcher();
 
   // Initialize concurrency from config
   setSyncConcurrency(config.sync_concurrency);
@@ -391,10 +393,10 @@ export async function runWatchMode(options: SyncOptions): Promise<void> {
   // Clean up stale/orphaned data from previous run
   db.transaction((tx) => {
     cleanupOrphanedJobs(dryRun, tx);
-    cleanupOrphanedClocks(dryRun, tx);
     cleanupOrphanedHashes(tx);
     cleanupOrphanedNodeMappings(tx);
   });
+  cleanupOrphanedSnapshots(config);
 
   // Set up file watching
   await setupWatchSubscriptions(config, createBatchHandler(), dryRun);
@@ -409,10 +411,10 @@ export async function runWatchMode(options: SyncOptions): Promise<void> {
     const newConfig = getConfig();
     db.transaction((tx) => {
       cleanupOrphanedJobs(dryRun, tx);
-      cleanupOrphanedClocks(dryRun, tx);
       cleanupOrphanedHashes(tx);
       cleanupOrphanedNodeMappings(tx);
     });
+    cleanupOrphanedSnapshots(newConfig);
     await setupWatchSubscriptions(newConfig, createBatchHandler(), dryRun);
   });
 

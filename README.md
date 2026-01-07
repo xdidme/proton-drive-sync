@@ -46,12 +46,12 @@ docker exec -it proton-drive-sync proton-drive-sync auth
 
 ### Platform Support
 
-| Platform            | Requirements                                                |
-| ------------------- | ----------------------------------------------------------- |
-| **macOS**           | [Homebrew](https://brew.sh) (for Watchman)                  |
-| **Linux** (beta)    | No extra requirements                                       |
-| **Windows** (alpha) | [Chocolatey](https://chocolatey.org/install) (for Watchman) |
-| **Docker**          | Docker Engine 20.10+, Docker Compose v2.0+                  |
+| Platform            | Requirements                               |
+| ------------------- | ------------------------------------------ |
+| **macOS**           | No extra requirements                      |
+| **Linux** (beta)    | No extra requirements                      |
+| **Windows** (alpha) | No extra requirements                      |
+| **Docker**          | Docker Engine 20.10+, Docker Compose v2.0+ |
 
 ### Dashboard
 

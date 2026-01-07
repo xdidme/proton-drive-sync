@@ -4,7 +4,7 @@
     Installs Proton Drive Sync on Windows
 
 .DESCRIPTION
-    Downloads and installs proton-drive-sync and Watchman, configures PATH,
+    Downloads and installs proton-drive-sync, configures PATH,
     and guides user through authentication.
 
 .PARAMETER Version
@@ -108,43 +108,6 @@ New-Item -ItemType Directory -Force -Path $BIN_DIR | Out-Null
 Write-Success "Created $INSTALL_DIR"
 
 # ============================================================================
-# Install Watchman via Chocolatey
-# ============================================================================
-
-Write-Step "Installing Watchman via Chocolatey..."
-
-if (-not (Test-Command "choco")) {
-    Write-Host "Error: Chocolatey is required to install Watchman on Windows." -ForegroundColor Red
-    Write-Host ""
-    Write-Host "Please install Chocolatey first:" -ForegroundColor Yellow
-    Write-Host "  https://chocolatey.org/install" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "Then re-run this installer." -ForegroundColor Yellow
-    exit 1
-}
-
-if (Test-Command "watchman") {
-    Write-Success "Watchman is already installed"
-}
-else {
-    try {
-        Write-Host "  Installing Watchman (this may require administrator privileges)..."
-        choco install watchman -y
-        if ($LASTEXITCODE -ne 0) {
-            throw "Chocolatey install failed with exit code $LASTEXITCODE"
-        }
-        Write-Success "Watchman installed via Chocolatey"
-    }
-    catch {
-        Write-Host "Error: Failed to install Watchman: $_" -ForegroundColor Red
-        Write-Host ""
-        Write-Host "Try running this installer as Administrator, or install Watchman manually:" -ForegroundColor Yellow
-        Write-Host "  choco install watchman" -ForegroundColor Cyan
-        exit 1
-    }
-}
-
-# ============================================================================
 # Install Proton Drive Sync
 # ============================================================================
 
@@ -239,14 +202,6 @@ if (-not (Test-Path $binPath)) {
     if (Test-Path $binPathNoExt) {
         Rename-Item -Path $binPathNoExt -NewName "$APP.exe"
     }
-}
-
-# Verify watchman
-if (Test-Command "watchman") {
-    Write-Success "Watchman: OK"
-}
-else {
-    Write-Warn "Watchman: Not found - please restart your terminal or run 'refreshenv'"
 }
 
 # Verify proton-drive-sync
