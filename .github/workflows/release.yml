@@ -126,6 +126,16 @@ jobs:
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
+          # Parse version for RPM (hyphens not allowed in Version field)
+          if [[ "$VERSION" == *-* ]]; then
+            RPM_VERSION="${VERSION%%-*}"
+            RPM_RELEASE="0.${VERSION#*-}"
+            RPM_RELEASE="${RPM_RELEASE//-/.}"
+          else
+            RPM_VERSION="$VERSION"
+            RPM_RELEASE="1"
+          fi
+
           for ARCH_PAIR in "amd64:x86_64" "arm64:aarch64"; do
             DEB_ARCH="${ARCH_PAIR%:*}"
             RPM_ARCH="${ARCH_PAIR#*:}"
@@ -135,7 +145,8 @@ jobs:
             cp packaging/rpm/proton-drive-sync.spec rpmbuild/SPECS/
 
             rpmbuild --define "_topdir $(pwd)/rpmbuild" \
-                     --define "_version ${VERSION}" \
+                     --define "_version ${RPM_VERSION}" \
+                     --define "_release ${RPM_RELEASE}" \
                      --target "${RPM_ARCH}" \
                      -bb rpmbuild/SPECS/proton-drive-sync.spec
 
@@ -149,8 +160,8 @@ jobs:
           gh release upload "v${VERSION}" \
             proton-drive-sync_${VERSION}_amd64.deb \
             proton-drive-sync_${VERSION}_arm64.deb \
-            proton-drive-sync-${VERSION}-1.x86_64.rpm \
-            proton-drive-sync-${VERSION}-1.aarch64.rpm
+            proton-drive-sync-*.x86_64.rpm \
+            proton-drive-sync-*.aarch64.rpm
         env:
           GH_TOKEN: ${{ github.token }}
 

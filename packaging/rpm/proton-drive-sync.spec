@@ -1,6 +1,6 @@
 Name:           proton-drive-sync
 Version:        %{_version}
-Release:        1
+Release:        %{_release}
 Summary:        Sync local directories to Proton Drive cloud storage
 License:        GPL-3.0
 URL:            https://github.com/DamianB-BitFlipper/proton-drive-sync
