@@ -19,14 +19,23 @@ import {
 
 const KEYCHAIN_SERVICE = 'proton-drive-sync';
 const KEYCHAIN_ACCOUNT = 'proton-drive-sync:tokens';
+const DEFAULT_KEYRING_PASSWORD = 'proton-drive-sync';
 
 /**
  * Check if we should use file-based storage.
- * On Linux, use file storage when KEYRING_PASSWORD env var is set (headless/service mode).
- * Otherwise, use keytar (macOS Keychain, Windows Credential Manager, Linux libsecret).
+ * On Linux, always use file-based encrypted storage (avoids libsecret/gnome-keyring complexity).
+ * On macOS/Windows, use keytar (Keychain/Credential Manager).
  */
 function useFileStorage(): boolean {
-  return process.platform === 'linux' && !!process.env.KEYRING_PASSWORD;
+  return process.platform === 'linux';
+}
+
+/**
+ * Get the keyring password for file-based storage.
+ * Uses KEYRING_PASSWORD env var if set, otherwise falls back to default.
+ */
+function getKeyringPassword(): string {
+  return process.env.KEYRING_PASSWORD || DEFAULT_KEYRING_PASSWORD;
 }
 
 /** Tokens stored in keychain for session reuse (parent/child session model) */
@@ -52,10 +61,9 @@ export interface StoredCredentials {
 
 export async function getStoredCredentials(): Promise<StoredCredentials | null> {
   try {
-    // Linux with KEYRING_PASSWORD: use file-based storage
+    // Linux: use file-based storage
     if (useFileStorage()) {
-      const password = process.env.KEYRING_PASSWORD!;
-      return getCredentialsFromFile(password) as StoredCredentials | null;
+      return getCredentialsFromFile(getKeyringPassword()) as StoredCredentials | null;
     }
 
     // macOS/Windows/Linux desktop: use keytar
@@ -69,10 +77,9 @@ export async function getStoredCredentials(): Promise<StoredCredentials | null> 
 }
 
 export async function storeCredentials(credentials: StoredCredentials): Promise<void> {
-  // Linux with KEYRING_PASSWORD: use file-based storage
+  // Linux: use file-based storage
   if (useFileStorage()) {
-    const password = process.env.KEYRING_PASSWORD!;
-    storeCredentialsToFile(credentials, password);
+    storeCredentialsToFile(credentials, getKeyringPassword());
     return;
   }
 
@@ -82,7 +89,7 @@ export async function storeCredentials(credentials: StoredCredentials): Promise<
 
 export async function deleteStoredCredentials(): Promise<void> {
   try {
-    // Linux with KEYRING_PASSWORD: use file-based storage
+    // Linux: use file-based storage
     if (useFileStorage()) {
       deleteCredentialsFile();
       return;

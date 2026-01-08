@@ -20,9 +20,9 @@ import {
 } from '../config.js';
 import type { Config } from '../config.js';
 import { writeFileSync, existsSync } from 'fs';
-import { chownToEffectiveUser } from '../paths.js';
+import { chownToEffectiveUser, getEffectiveHome } from '../paths.js';
 import { authCommand } from './auth.js';
-import { serviceInstallCommand, isServiceInstalled } from './service/index.js';
+import { serviceInstallCommand, isServiceInstalled, loadSyncService } from './service/index.js';
 import type { InstallScope } from './service/types.js';
 
 // ============================================================================
@@ -87,6 +87,27 @@ function saveConfig(config: Config): void {
   ensureConfigDir();
   writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
   chownToEffectiveUser(CONFIG_FILE);
+}
+
+function getInstalledServiceScope(): InstallScope | null {
+  if (process.platform === 'linux') {
+    // Check system-level first (more specific)
+    if (existsSync('/etc/systemd/system/proton-drive-sync.service')) {
+      return 'system';
+    }
+    // Check user-level
+    const home = getEffectiveHome();
+    if (existsSync(`${home}/.config/systemd/user/proton-drive-sync.service`)) {
+      return 'user';
+    }
+  } else if (process.platform === 'darwin') {
+    // macOS only has user-level LaunchAgents
+    const home = getEffectiveHome();
+    if (existsSync(`${home}/Library/LaunchAgents/com.damianb-bitflipper.proton-drive-sync.plist`)) {
+      return 'user';
+    }
+  }
+  return null;
 }
 
 function openBrowser(url: string): void {
@@ -165,7 +186,28 @@ async function configureService(): Promise<boolean> {
     });
     if (!reinstall) {
       logger.info('Keeping existing service configuration.');
-      return true;
+
+      // Restart the service to apply any config changes
+      const scope = getInstalledServiceScope();
+      if (!scope) {
+        logger.warn('Could not determine service scope.');
+        return true;
+      }
+
+      if (process.platform === 'linux' && scope === 'system') {
+        // System services require sudo to restart
+        const binPath = process.execPath;
+        logger.info('Restarting system service (requires sudo)...');
+        const result = Bun.spawnSync(
+          ['sudo', binPath, 'service', 'load', '--install-scope', 'system'],
+          { stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' }
+        );
+        return result.exitCode === 0;
+      } else {
+        // User services (Linux user-level or macOS) can be restarted directly
+        logger.info('Restarting service...');
+        return await loadSyncService(scope);
+      }
     }
   }
 
@@ -248,11 +290,6 @@ async function configureAuth(): Promise<void> {
       logger.info('Keeping existing credentials.');
       return;
     }
-  }
-
-  // On Linux, set KEYRING_PASSWORD for file-based credential storage
-  if (process.platform === 'linux') {
-    process.env.KEYRING_PASSWORD = 'proton-drive-sync';
   }
 
   await authCommand({});
