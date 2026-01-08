@@ -6,9 +6,11 @@
  */
 
 import { createCipheriv, createDecipheriv, randomBytes, pbkdf2Sync } from 'crypto';
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { dirname, join } from 'path';
+
 import { logger } from './logger.js';
+import { getEffectiveHome, chownToEffectiveUser, ensureDir } from './paths.js';
 
 const CREDENTIALS_FILENAME = 'credentials.enc';
 const ALGORITHM = 'aes-256-gcm';
@@ -32,8 +34,8 @@ function getCredentialsPath(): string {
     return join(xdgConfig, 'proton-drive-sync', CREDENTIALS_FILENAME);
   }
 
-  // Default to user scope
-  const home = process.env.HOME || '/root';
+  // Default to user scope, respecting SUDO_USER if set
+  const home = getEffectiveHome();
   return join(home, '.config', 'proton-drive-sync', CREDENTIALS_FILENAME);
 }
 
@@ -85,13 +87,12 @@ export function storeCredentialsToFile(credentials: object, password: string): v
   const path = getCredentialsPath();
   const dir = dirname(path);
 
-  // Ensure directory exists
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
+  // Ensure directory exists (and chown to sudo user if applicable)
+  ensureDir(dir);
 
   const encrypted = encryptCredentials(JSON.stringify(credentials), password);
   writeFileSync(path, encrypted, { mode: 0o600 }); // rw------- (owner only)
+  chownToEffectiveUser(path);
   logger.debug(`Credentials stored to ${path}`);
 }
 

@@ -8,31 +8,66 @@ https://github.com/user-attachments/assets/bf1fccac-9a08-4da1-bc0c-2c06d510fbf1
 
 </p>
 
-## Getting Started
+## Installation
 
-### Install: macOS / Linux
+### macOS (Homebrew)
 
 ```bash
-$ bash <(curl -fsSL https://www.damianb.dev/proton-drive-sync/install.sh)
+brew tap DamianB-BitFlipper/tap
+brew update
+brew install proton-drive-sync
+
+proton-drive-sync setup
+```
+
+### Debian / Ubuntu
+
+Download the `.deb` file for your architecture from [GitHub Releases](https://github.com/DamianB-BitFlipper/proton-drive-sync/releases).
+
+```bash
+sudo apt update
+sudo apt install libsecret-1-0
+sudo dpkg -i <downloaded.deb>
+
+proton-drive-sync setup
+```
+
+### Fedora / RHEL / CentOS
+
+Download the `.rpm` file for your architecture from [GitHub Releases](https://github.com/DamianB-BitFlipper/proton-drive-sync/releases).
+
+```bash
+sudo dnf update
+sudo dnf install libsecret
+sudo dnf install ./<downloaded.rpm>
+
+proton-drive-sync setup
 ```
 
 <details>
-<summary>Install: Windows</summary>
+<summary>Other Linux</summary>
 
-Run the following command in PowerShell:
+Download the Linux tarball from [GitHub Releases](https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest):
 
-```powershell
-irm https://www.damianb.dev/proton-drive-sync/install.ps1 | iex
+```bash
+tar -xzf proton-drive-sync-linux-x64.tar.gz
+sudo mv proton-drive-sync /usr/local/bin/
+proton-drive-sync setup
 ```
 
 </details>
 
 <details>
-<summary>Install: Docker</summary>
+<summary>Windows (alpha)</summary>
+
+Download the `.zip` from [GitHub Releases](https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest), extract, and add to your PATH.
+
+</details>
+
+<details>
+<summary>Docker (WIP)</summary>
 
 See **[DOCKER_SETUP.md](DOCKER_SETUP.md)** for running with Docker Compose on Linux x86_64 and ARM64.
-
-Quick start:
 
 ```bash
 cd docker/
@@ -44,45 +79,38 @@ docker exec -it proton-drive-sync proton-drive-sync auth
 
 </details>
 
-### Platform Support
-
-| Platform            | Requirements                                                |
-| ------------------- | ----------------------------------------------------------- |
-| **macOS**           | [Homebrew](https://brew.sh) (for Watchman)                  |
-| **Linux** (beta)    | No extra requirements                                       |
-| **Windows** (alpha) | [Chocolatey](https://chocolatey.org/install) (for Watchman) |
-| **Docker**          | Docker Engine 20.10+, Docker Compose v2.0+                  |
+## Usage
 
 ### Dashboard
 
 The dashboard runs locally at http://localhost:4242. Use it to configure and manage the sync client.
 
-### Supplementary Commands
+### Commands
 
-1. If you need to reauthenticate: `proton-drive-sync auth`
+| Command                    | Description                                          |
+| -------------------------- | ---------------------------------------------------- |
+| `proton-drive-sync setup`  | Interactive setup wizard (recommended for first run) |
+| `proton-drive-sync auth`   | Authenticate with Proton                             |
+| `proton-drive-sync start`  | Start the sync daemon                                |
+| `proton-drive-sync stop`   | Stop the sync daemon                                 |
+| `proton-drive-sync status` | Show sync status                                     |
+| `proton-drive-sync --help` | Show all available commands                          |
 
-2. If you would like to start the sync client (as a daemon): `proton-drive-sync start`
+### Uninstall
 
-3. If you would like to stop the sync client: `proton-drive-sync stop`
-
-4. For more advanced commands, see: `proton-drive-sync --help`
-
-### Uninstall: macOS / Linux
+To completely remove proton-drive-sync and all its data:
 
 ```bash
-$ bash <(curl -fsSL https://www.damianb.dev/proton-drive-sync/uninstall.sh)
+proton-drive-sync reset --purge
 ```
 
-<details>
-<summary>Uninstall: Windows</summary>
+This will stop the service, remove credentials, and delete all configuration and sync history.
 
-Run the following command in PowerShell:
+For package managers:
 
-```powershell
-irm https://www.damianb.dev/proton-drive-sync/uninstall.ps1 | iex
-```
-
-</details>
+- **Homebrew**: `brew uninstall proton-drive-sync`
+- **Debian/Ubuntu**: `sudo apt remove proton-drive-sync`
+- **Fedora/RHEL**: `sudo dnf remove proton-drive-sync`
 
 ## Development
 

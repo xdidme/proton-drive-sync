@@ -21,6 +21,8 @@ import { stopCommand } from './cli/stop.js';
 import { startCommand } from './cli/start.js';
 import { statusCommand } from './cli/status.js';
 import { dashboardCommand } from './cli/dashboard.js';
+import { reconcileCommand } from './cli/reconcile.js';
+import { setupCommand } from './cli/setup.js';
 
 const { version } = (await import('../package.json')).default;
 
@@ -59,6 +61,7 @@ program
   .option('-y, --yes', 'Skip confirmation prompt')
   .option('--signals', 'Clear only the signals table')
   .option('--retries', 'Remove only sync jobs pending retry')
+  .option('--purge', 'Delete all data, credentials, and uninstall service')
   .action(resetCommand);
 
 program
@@ -129,5 +132,15 @@ serviceCommand
   .description('Unload the service (will reload on next boot)')
   .option('--install-scope <scope>', 'Install scope: user or system (Linux only)', 'user')
   .action((options) => serviceUnloadCommand(options.installScope as InstallScope));
+
+program
+  .command('reconcile')
+  .description('Trigger full filesystem scan on running daemon')
+  .action(reconcileCommand);
+
+program
+  .command('setup')
+  .description('Interactive setup wizard for first-time configuration')
+  .action(setupCommand);
 
 program.parse();

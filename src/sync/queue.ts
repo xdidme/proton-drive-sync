@@ -66,8 +66,8 @@ export interface Job {
   lastError: string | null;
   /** Timestamp when this job was created */
   createdAt: Date;
-  /** SHA1 hash of file content for change detection (null for directories) */
-  contentHash: string | null;
+  /** Change token (mtime:size) for change detection (null for directories) */
+  changeToken: string | null;
   /** Original local path before rename/move (null for CREATE/UPDATE/DELETE) */
   oldLocalPath: string | null;
   /** Original remote path before rename/move (null for CREATE/UPDATE/DELETE) */
@@ -92,10 +92,7 @@ export const dryRunSyncedIds = new Set<number>();
 // ============================================================================
 
 /** Parameters for creating a new sync job - subset of Job fields */
-export type EnqueueJobParams = Pick<
-  Job,
-  'eventType' | 'localPath' | 'remotePath' | 'contentHash' | 'oldLocalPath' | 'oldRemotePath'
->;
+export type EnqueueJobParams = Pick<Job, 'eventType' | 'localPath' | 'remotePath' | 'changeToken'>;
 
 /**
  * Add a sync job to the queue, or update if one already exists for this localPath.
@@ -136,22 +133,21 @@ export function enqueueJob(params: EnqueueJobParams, dryRun: boolean, tx: Tx): v
         retryAt: new Date(),
         nRetries: 0,
         lastError: null,
-        contentHash: params.contentHash ?? null,
-        oldLocalPath: params.oldLocalPath ?? null,
-        oldRemotePath: params.oldRemotePath ?? null,
+        changeToken: params.changeToken ?? null,
+        oldLocalPath: null,
+        oldRemotePath: null,
       })
       .onConflictDoUpdate({
-        target: schema.syncJobs.localPath,
+        target: [schema.syncJobs.localPath, schema.syncJobs.remotePath],
         set: {
           eventType: params.eventType,
-          remotePath: params.remotePath,
           status: SyncJobStatus.PENDING,
           retryAt: new Date(),
           nRetries: 0,
           lastError: null,
-          contentHash: params.contentHash ?? null,
-          oldLocalPath: params.oldLocalPath ?? null,
-          oldRemotePath: params.oldRemotePath ?? null,
+          changeToken: params.changeToken ?? null,
+          oldLocalPath: null,
+          oldRemotePath: null,
         },
       })
   );
@@ -160,7 +156,12 @@ export function enqueueJob(params: EnqueueJobParams, dryRun: boolean, tx: Tx): v
   const job = tx
     .select({ id: schema.syncJobs.id })
     .from(schema.syncJobs)
-    .where(eq(schema.syncJobs.localPath, params.localPath))
+    .where(
+      and(
+        eq(schema.syncJobs.localPath, params.localPath),
+        eq(schema.syncJobs.remotePath, params.remotePath)
+      )
+    )
     .get();
 
   if (!job) {
@@ -237,7 +238,7 @@ export function getNextPendingJob(dryRun: boolean = false): Job | undefined {
         retryAt: schema.syncJobs.retryAt,
         lastError: schema.syncJobs.lastError,
         createdAt: schema.syncJobs.createdAt,
-        contentHash: schema.syncJobs.contentHash,
+        changeToken: schema.syncJobs.changeToken,
         oldLocalPath: schema.syncJobs.oldLocalPath,
         oldRemotePath: schema.syncJobs.oldRemotePath,
       })
@@ -311,7 +312,7 @@ export function getNextPendingJob(dryRun: boolean = false): Job | undefined {
         retryAt: schema.syncJobs.retryAt,
         lastError: schema.syncJobs.lastError,
         createdAt: schema.syncJobs.createdAt,
-        contentHash: schema.syncJobs.contentHash,
+        changeToken: schema.syncJobs.changeToken,
         oldLocalPath: schema.syncJobs.oldLocalPath,
         oldRemotePath: schema.syncJobs.oldRemotePath,
       })

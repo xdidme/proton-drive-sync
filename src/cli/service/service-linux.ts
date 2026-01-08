@@ -6,9 +6,15 @@
 
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
+
 import { setFlag, clearFlag, FLAGS } from '../../flags.js';
 import { logger } from '../../logger.js';
+import {
+  getEffectiveHome,
+  getSudoUser,
+  getEffectiveUid,
+  chownToEffectiveUser,
+} from '../../paths.js';
 import type { ServiceOperations, InstallScope } from './types.js';
 // @ts-expect-error Bun text imports
 import serviceTemplate from './templates/proton-drive-sync.service' with { type: 'text' };
@@ -34,7 +40,7 @@ interface ServicePaths {
 }
 
 function getPaths(scope: InstallScope): ServicePaths {
-  const home = homedir();
+  const home = getEffectiveHome();
 
   if (scope === 'system') {
     return {
@@ -61,37 +67,13 @@ function isRunningAsRoot(): boolean {
 
 function getCurrentUser(): string {
   // When running as root via sudo, SUDO_USER contains the original user
-  const sudoUser = process.env.SUDO_USER;
+  const sudoUser = getSudoUser();
   if (sudoUser) {
     return sudoUser;
   }
   // Fallback to whoami
   const result = Bun.spawnSync(['whoami']);
   return new TextDecoder().decode(result.stdout).trim();
-}
-
-function getCurrentUid(): number {
-  // When running as root via sudo, get the UID of the original user
-  const sudoUid = process.env.SUDO_UID;
-  if (sudoUid) {
-    return parseInt(sudoUid, 10);
-  }
-  return process.getuid?.() ?? 1000;
-}
-
-function getUserHome(): string {
-  // When running as root via sudo, get the home directory of the original user
-  const sudoUser = process.env.SUDO_USER;
-  if (sudoUser) {
-    const result = Bun.spawnSync(['getent', 'passwd', sudoUser]);
-    const output = new TextDecoder().decode(result.stdout).trim();
-    // getent passwd returns: username:x:uid:gid:comment:home:shell
-    const parts = output.split(':');
-    if (parts.length >= 6 && parts[5]) {
-      return parts[5];
-    }
-  }
-  return homedir();
 }
 
 function runSystemctl(
@@ -104,7 +86,7 @@ function runSystemctl(
   // For user scope, ensure XDG_RUNTIME_DIR is set (required for systemctl --user)
   const env =
     scope === 'user'
-      ? { ...process.env, XDG_RUNTIME_DIR: `/run/user/${getCurrentUid()}` }
+      ? { ...process.env, XDG_RUNTIME_DIR: `/run/user/${getEffectiveUid()}` }
       : undefined;
 
   const result = Bun.spawnSync(systemctlArgs, { env });
@@ -125,8 +107,8 @@ function daemonReload(scope: InstallScope): boolean {
 // ============================================================================
 
 function generateServiceFile(binPath: string, password: string, scope: InstallScope): string {
-  const home = getUserHome();
-  const uid = getCurrentUid();
+  const home = getEffectiveHome();
+  const uid = getEffectiveUid();
 
   let content = serviceTemplate
     .replace('{{BIN_PATH}}', binPath)
@@ -166,11 +148,13 @@ function createLinuxService(scope: InstallScope): ServiceOperations {
       // Create systemd directory if it doesn't exist
       if (!existsSync(paths.serviceDir)) {
         mkdirSync(paths.serviceDir, { recursive: true });
+        chownToEffectiveUser(paths.serviceDir);
       }
 
       // Create data directory if it doesn't exist
       if (!existsSync(paths.dataDir)) {
         mkdirSync(paths.dataDir, { recursive: true });
+        chownToEffectiveUser(paths.dataDir);
       }
 
       logger.info(`Installing proton-drive-sync service (${scope} scope)...`);

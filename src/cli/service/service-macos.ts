@@ -4,19 +4,20 @@
 
 import { existsSync, mkdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
+
 import { setFlag, clearFlag, FLAGS } from '../../flags.js';
 import { logger } from '../../logger.js';
+import { getEffectiveHome, chownToEffectiveUser } from '../../paths.js';
 import type { ServiceOperations, ServiceResult } from './types.js';
 // @ts-expect-error Bun text imports
 import plistTemplate from './templates/proton-drive-sync.plist' with { type: 'text' };
 
-const PLIST_DIR = join(homedir(), 'Library', 'LaunchAgents');
+const PLIST_DIR = join(getEffectiveHome(), 'Library', 'LaunchAgents');
 const SERVICE_NAME = 'com.damianb-bitflipper.proton-drive-sync';
 const PLIST_PATH = join(PLIST_DIR, `${SERVICE_NAME}.plist`);
 
 function generatePlist(binPath: string): string {
-  const home = homedir();
+  const home = getEffectiveHome();
   return plistTemplate
     .replace('{{SERVICE_NAME}}', SERVICE_NAME)
     .replace('{{BIN_PATH}}', binPath)
@@ -99,6 +100,7 @@ export const macosService: ServiceOperations = {
     // Create LaunchAgents directory if it doesn't exist
     if (!existsSync(PLIST_DIR)) {
       mkdirSync(PLIST_DIR, { recursive: true });
+      chownToEffectiveUser(PLIST_DIR);
     }
 
     logger.info('Installing proton-drive-sync service...');
@@ -106,6 +108,7 @@ export const macosService: ServiceOperations = {
       unloadServiceInternal(SERVICE_NAME, PLIST_PATH);
     }
     await Bun.write(PLIST_PATH, generatePlist(binPath));
+    chownToEffectiveUser(PLIST_PATH);
     logger.info(`Created: ${PLIST_PATH}`);
     setFlag(FLAGS.SERVICE_INSTALLED);
 

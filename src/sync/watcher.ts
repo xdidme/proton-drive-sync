@@ -1,18 +1,22 @@
 /**
- * Watchman File Watcher
+ * File Watcher (fs.watch)
  *
- * Handles Watchman client management, file change detection, and subscriptions.
+ * Handles file change detection using Node's built-in fs.watch with
+ * file_state DB table for persistence and change detection.
  */
 
-import { existsSync, realpathSync, writeFileSync } from 'fs';
-import { basename, join } from 'path';
-import watchman from 'fb-watchman';
-import { getClock, setClock } from '../state.js';
+import { watch, type FSWatcher, statSync, existsSync } from 'fs';
+import { join, relative } from 'path';
+import { eq, like } from 'drizzle-orm';
 import { logger } from '../logger.js';
-import { setFlag, clearFlag, getFlagData, FLAGS, WATCHMAN_STATE, ALL_VARIANTS } from '../flags.js';
-import { sendSignal } from '../signals.js';
-import { getConfig, type Config } from '../config.js';
-import { WATCHMAN_SUB_NAME, WATCHMAN_SETTLE_MS } from './constants.js';
+import { type Config } from '../config.js';
+import { db } from '../db/index.js';
+import { fileState } from '../db/schema.js';
+import {
+  WATCHER_DEBOUNCE_MS,
+  RECONCILIATION_INTERVAL_MS,
+  DIRTY_PATH_DEBOUNCE_MS,
+} from './constants.js';
 
 // ============================================================================
 // Types
@@ -24,397 +28,608 @@ export interface FileChange {
   mtime_ms: number; // Last modification time in milliseconds since epoch
   exists: boolean; // false if the file was deleted
   type: 'f' | 'd'; // 'f' for file, 'd' for directory
-  new: boolean; // true if file is newer than the 'since' clock (i.e., newly created)
-  watchRoot: string; // Which watch root this change came from (added by us, not from Watchman)
-  ino: number; // Inode number - stable across renames/moves within same filesystem
-  'content.sha1hex'?: string; // Content hash for files (null/undefined for directories)
-}
-
-interface WatchmanQueryResponse {
-  clock: string;
-  files: Omit<FileChange, 'watchRoot'>[];
+  new: boolean; // true if file is newly created
+  watchRoot: string; // Which watch root this change came from
+  ino: number; // Inode number (0 if unavailable)
 }
 
 export type FileChangeHandler = (file: FileChange) => void;
 export type FileChangeBatchHandler = (files: FileChange[]) => void;
 
 // ============================================================================
+// Constants
+// ============================================================================
+
+// ============================================================================
 // State
 // ============================================================================
 
-/** Track active subscription names for teardown */
-let activeSubscriptions: { root: string; subName: string }[] = [];
+/** Track active fs.watch watchers for teardown */
+const activeWatchers: Map<string, FSWatcher> = new Map();
 
-/** Map subscription name -> configured source path (resolved) for event routing */
-const subscriptionToSourcePath: Map<string, string> = new Map();
+/** Track paths with recent events for incremental reconciliation (path -> timestamp when first marked dirty) */
+const dirtyPaths: Map<string, number> = new Map();
 
-// ============================================================================
-// Watchman Client
-// ============================================================================
+/** Debounce timers per path */
+const debounceTimers: Map<string, Timer> = new Map();
 
-const watchmanClient = new watchman.Client();
+/** Reconciliation timer */
+let reconciliationTimer: Timer | null = null;
 
-/** Promisified wrapper for Watchman command */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function watchmanCommand<T>(args: any[]): Promise<T> {
-  return new Promise((resolve, reject) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (watchmanClient as any).command(args, (err: Error | null, resp: T) => {
-      if (err) reject(err);
-      else resolve(resp);
-    });
-  });
-}
-
-/** Check if watchman is already running without starting it */
-function isWatchmanRunning(): boolean {
-  const result = Bun.spawnSync(['watchman', 'get-pid', '--no-spawn']);
-  return result.exitCode === 0;
-}
-
-/** Connect to Watchman and track if we spawned it */
-export async function connectWatchman(): Promise<void> {
-  const wasRunning = isWatchmanRunning();
-
-  // The client will auto-start watchman if not running
-  await watchmanCommand<{ version: string }>(['version']);
-
-  if (!wasRunning) {
-    setFlag(FLAGS.WATCHMAN_RUNNING, WATCHMAN_STATE.SPAWNED);
-    logger.debug('Watchman was not running, we spawned it');
-  } else {
-    setFlag(FLAGS.WATCHMAN_RUNNING, WATCHMAN_STATE.EXISTING);
-    logger.debug('Watchman was already running');
-  }
-
-  // Signal dashboard to refresh (watchman is now ready)
-  sendSignal('refresh-dashboard');
-}
-
-/** Close the Watchman client connection */
-export function closeWatchman(): void {
-  watchmanClient.end();
-}
-
-/** Shutdown watchman server if we spawned it */
-export function shutdownWatchman(): void {
-  const watchmanState = getFlagData(FLAGS.WATCHMAN_RUNNING);
-  if (watchmanState === WATCHMAN_STATE.SPAWNED) {
-    logger.debug('Shutting down watchman server (we spawned it)');
-    Bun.spawnSync(['watchman', 'shutdown-server']);
-  }
-  clearFlag(FLAGS.WATCHMAN_RUNNING, ALL_VARIANTS);
-}
+/** Stored references for reconciliation callback */
+let reconciliationConfig: Config | null = null;
+let reconciliationCallback: FileChangeBatchHandler | null = null;
 
 // ============================================================================
-// Watchman Config
+// Change Token Helpers
 // ============================================================================
 
 /**
- * Ensures a .watchmanconfig file exists in the watch directory with settle configuration.
- * Only creates the file if it doesn't already exist (respects user config).
+ * Build a change token from mtime and size (format: "mtime_ms:size")
  */
-function ensureWatchmanConfig(watchDir: string): void {
-  const configPath = join(watchDir, '.watchmanconfig');
+function buildChangeToken(mtime_ms: number, size: number): string {
+  return `${mtime_ms}:${size}`;
+}
 
-  if (existsSync(configPath)) {
-    logger.debug(`[watchman] .watchmanconfig already exists at ${configPath}, skipping`);
-    return;
+/**
+ * Get stored change token for a path from the database
+ */
+function getStoredChangeToken(localPath: string): string | null {
+  const result = db.select().from(fileState).where(eq(fileState.localPath, localPath)).get();
+  return result?.changeToken ?? null;
+}
+
+/**
+ * Get all stored change tokens under a sync directory
+ */
+function getAllStoredChangeTokens(syncDirPath: string): Map<string, string> {
+  const pathPrefix = syncDirPath.endsWith('/') ? syncDirPath : `${syncDirPath}/`;
+  const results = db
+    .select()
+    .from(fileState)
+    .where(like(fileState.localPath, `${pathPrefix}%`))
+    .all();
+
+  const tokenMap = new Map<string, string>();
+  for (const row of results) {
+    tokenMap.set(row.localPath, row.changeToken);
   }
+  return tokenMap;
+}
 
-  const config = { settle: WATCHMAN_SETTLE_MS };
+// ============================================================================
+// File System Scanning
+// ============================================================================
+
+/**
+ * Scan a directory recursively and return all files/directories with their stats
+ */
+export async function scanDirectory(
+  watchDir: string
+): Promise<Map<string, { size: number; mtime_ms: number; isDirectory: boolean; ino: number }>> {
+  const results = new Map<
+    string,
+    { size: number; mtime_ms: number; isDirectory: boolean; ino: number }
+  >();
+
   try {
-    writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
-    logger.info(
-      `[watchman] Created .watchmanconfig in ${watchDir} with settle: ${WATCHMAN_SETTLE_MS}ms`
-    );
+    // Use Bun.Glob to scan all files and directories
+    const glob = new Bun.Glob('**/*');
+    const entries = glob.scanSync({ cwd: watchDir, dot: false });
+
+    for (const entry of entries) {
+      const fullPath = join(watchDir, entry);
+      try {
+        const stats = statSync(fullPath);
+        results.set(fullPath, {
+          size: stats.size,
+          mtime_ms: stats.mtimeMs,
+          isDirectory: stats.isDirectory(),
+          ino: stats.ino,
+        });
+      } catch {
+        // File may have been deleted during scan, skip it
+      }
+    }
   } catch (err) {
     logger.warn(
-      `[watchman] Failed to create .watchmanconfig in ${watchDir}: ${err instanceof Error ? err.message : String(err)}`
+      `Failed to scan directory ${watchDir}: ${err instanceof Error ? err.message : String(err)}`
     );
   }
+
+  return results;
 }
 
-// ============================================================================
-// Watchman Helpers (promisified)
-// ============================================================================
+/**
+ * Compare filesystem state against stored change tokens and generate changes
+ */
+function compareWithStoredChangeTokens(
+  watchDir: string,
+  fsState: Map<string, { size: number; mtime_ms: number; isDirectory: boolean; ino: number }>,
+  storedTokens: Map<string, string>
+): FileChange[] {
+  const changes: FileChange[] = [];
 
-/** Promisified wrapper for Watchman watch-project command */
-function registerWithWatchman(dir: string): Promise<watchman.WatchProjectResponse> {
-  return new Promise((resolve, reject) => {
-    watchmanClient.command(['watch-project', dir], (err, resp) => {
-      if (err) reject(err);
-      else resolve(resp as watchman.WatchProjectResponse);
-    });
-  });
-}
+  // Check for new and updated files
+  for (const [fullPath, stats] of fsState) {
+    const relativePath = relative(watchDir, fullPath);
+    const currentToken = buildChangeToken(stats.mtime_ms, stats.size);
+    const storedToken = storedTokens.get(fullPath);
 
-/** Promisified wrapper for Watchman query command */
-function queryWatchman(
-  root: string,
-  query: Record<string, unknown>
-): Promise<WatchmanQueryResponse> {
-  return new Promise((resolve, reject) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (watchmanClient as any).command(
-      ['query', root, query],
-      (err: Error | null, resp: WatchmanQueryResponse) => {
-        if (err) reject(err);
-        else resolve(resp);
-      }
-    );
-  });
-}
-
-/** Promisified wrapper for Watchman subscribe command */
-function subscribeWatchman(
-  root: string,
-  subName: string,
-  sub: Record<string, unknown>
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (watchmanClient as any).command(['subscribe', root, subName, sub], (err: Error | null) => {
-      if (err) reject(err);
-      else resolve();
-    });
-  });
-}
-
-/** Promisified wrapper for Watchman unsubscribe command */
-function unsubscribeWatchman(root: string, subName: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (watchmanClient as any).command(['unsubscribe', root, subName], (err: Error | null) => {
-      if (err) reject(err);
-      else resolve();
-    });
-  });
-}
-
-interface WatchmanQueryOptions {
-  savedClock: string | null;
-  relative: string;
-}
-
-/** Build a Watchman query/subscription object */
-function buildWatchmanQuery(options: WatchmanQueryOptions): Record<string, unknown> {
-  const { savedClock, relative } = options;
-
-  const query: Record<string, unknown> = {
-    expression: ['anyof', ['type', 'f'], ['type', 'd']],
-    fields: ['name', 'size', 'mtime_ms', 'exists', 'type', 'new', 'ino', 'content.sha1hex'],
-  };
-
-  if (savedClock) {
-    query.since = savedClock;
+    if (!storedToken) {
+      // New file/directory
+      changes.push({
+        name: relativePath,
+        size: stats.size,
+        mtime_ms: stats.mtime_ms,
+        exists: true,
+        type: stats.isDirectory ? 'd' : 'f',
+        new: true,
+        watchRoot: watchDir,
+        ino: stats.ino,
+      });
+    } else if (storedToken !== currentToken && !stats.isDirectory) {
+      // File updated (only track changes for files, not directories)
+      changes.push({
+        name: relativePath,
+        size: stats.size,
+        mtime_ms: stats.mtime_ms,
+        exists: true,
+        type: 'f',
+        new: false,
+        watchRoot: watchDir,
+        ino: stats.ino,
+      });
+    }
   }
 
-  if (relative) {
-    query.relative_root = relative;
+  // Check for deleted files (in DB but not on filesystem)
+  for (const [storedPath] of storedTokens) {
+    if (!fsState.has(storedPath)) {
+      const relativePath = relative(watchDir, storedPath);
+      changes.push({
+        name: relativePath,
+        size: 0,
+        mtime_ms: Date.now(),
+        exists: false,
+        type: 'f', // We don't know if it was a file or directory
+        new: false,
+        watchRoot: watchDir,
+        ino: 0,
+      });
+    }
   }
 
-  return query;
+  return changes;
 }
 
 // ============================================================================
-// One-shot Query
+// Watcher Initialization
+// ============================================================================
+
+/**
+ * Initialize the watcher (no-op for fs.watch - no daemon needed)
+ */
+export async function initializeWatcher(): Promise<void> {
+  logger.debug('File watcher initialized');
+}
+
+/**
+ * Close the watcher and clean up subscriptions
+ */
+export async function closeWatcher(): Promise<void> {
+  await teardownWatchSubscriptions();
+}
+
+/**
+ * Clear all stored file state (used by reset command to force full resync)
+ * Returns the number of entries cleared
+ */
+export function clearAllSnapshots(): number {
+  const result = db.select().from(fileState).all();
+  const count = result.length;
+  db.delete(fileState).run();
+  return count;
+}
+
+// ============================================================================
+// One-shot Query (Startup Scan)
 // ============================================================================
 
 /**
  * Query all configured directories for changes since last sync.
- * Returns all file changes found across all directories.
+ * Compares filesystem state against file_state table.
  */
 export async function queryAllChanges(
   config: Config,
-  onFileChangeBatch: FileChangeBatchHandler,
-  dryRun: boolean
+  onFileChangeBatch: FileChangeBatchHandler
 ): Promise<number> {
   let totalChanges = 0;
 
-  await Promise.all(
-    config.sync_dirs.map(async (dir) => {
-      const watchDir = realpathSync(dir.source_path);
+  for (const dir of config.sync_dirs) {
+    const watchDir = dir.source_path;
 
-      // Register directory with Watchman
-      const watchResp = await registerWithWatchman(watchDir);
-      const root = watchResp.watch;
-      const relative = watchResp.relative_path || '';
+    if (!existsSync(watchDir)) {
+      logger.warn(`Sync directory does not exist: ${watchDir}`);
+      continue;
+    }
 
-      const savedClock = getClock(watchDir);
+    // Get stored change tokens for this sync directory
+    const storedTokens = getAllStoredChangeTokens(watchDir);
+    const hasStoredState = storedTokens.size > 0;
 
-      if (savedClock) {
-        logger.info(`Syncing changes since last run for ${dir.source_path}...`);
-      } else {
-        logger.info(`First run - syncing all existing files in ${dir.source_path}...`);
-      }
+    if (hasStoredState) {
+      logger.info(`Syncing changes since last run for ${dir.source_path}...`);
+    } else {
+      logger.info(`First run - syncing all existing files in ${dir.source_path}...`);
+    }
 
-      const query = buildWatchmanQuery({ savedClock, relative });
-      const resp = await queryWatchman(root, query);
+    // Scan the filesystem
+    const fsState = await scanDirectory(watchDir);
 
-      // Save clock
-      if (resp.clock) {
-        setClock(watchDir, resp.clock, dryRun);
-      }
+    // Compare and generate changes
+    const changes = compareWithStoredChangeTokens(watchDir, fsState, storedTokens);
 
-      // Process changes as a batch
-      const files = resp.files || [];
-      if (files.length > 0) {
-        const fileChanges: FileChange[] = files.map((file) => ({
-          ...file,
-          watchRoot: watchDir,
-        }));
-        onFileChangeBatch(fileChanges);
-        totalChanges += files.length;
-      }
-    })
-  );
+    if (changes.length > 0) {
+      onFileChangeBatch(changes);
+      totalChanges += changes.length;
+    }
+  }
 
   return totalChanges;
 }
 
 // ============================================================================
-// Watch Mode (Subscriptions)
+// Live Watching (fs.watch)
 // ============================================================================
 
 /**
- * Set up Watchman subscriptions for all configured directories.
+ * Handle a debounced file system event
+ */
+function handleDebouncedEvent(
+  watchDir: string,
+  filename: string,
+  onFileChangeBatch: FileChangeBatchHandler
+): void {
+  const fullPath = join(watchDir, filename);
+  const relativePath = filename;
+
+  // Add to dirty paths for incremental reconciliation (only if not already tracked)
+  if (!dirtyPaths.has(fullPath)) {
+    dirtyPaths.set(fullPath, Date.now());
+  }
+
+  try {
+    if (existsSync(fullPath)) {
+      // File exists - it's either a create or update
+      const stats = statSync(fullPath);
+      const currentToken = buildChangeToken(stats.mtimeMs, stats.size);
+      const storedToken = getStoredChangeToken(fullPath);
+
+      const isNew = !storedToken;
+      const isChanged = storedToken && storedToken !== currentToken;
+
+      // Skip if file hasn't actually changed
+      if (!isNew && !isChanged) {
+        logger.debug(`[watcher] no change detected: ${filename}`);
+        return;
+      }
+
+      const change: FileChange = {
+        name: relativePath,
+        size: stats.size,
+        mtime_ms: stats.mtimeMs,
+        exists: true,
+        type: stats.isDirectory() ? 'd' : 'f',
+        new: isNew,
+        watchRoot: watchDir,
+        ino: stats.ino,
+      };
+
+      onFileChangeBatch([change]);
+    } else {
+      // File doesn't exist - it's a delete
+      const change: FileChange = {
+        name: relativePath,
+        size: 0,
+        mtime_ms: Date.now(),
+        exists: false,
+        type: 'f', // Default to file
+        new: false,
+        watchRoot: watchDir,
+        ino: 0,
+      };
+
+      onFileChangeBatch([change]);
+    }
+  } catch (err) {
+    logger.debug(
+      `[watcher] Error handling event for ${fullPath}: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+}
+
+/**
+ * Set up watch subscriptions for all configured directories.
  * Calls onFileChangeBatch for each batch of file changes detected.
  */
 export async function setupWatchSubscriptions(
   config: Config,
-  onFileChangeBatch: FileChangeBatchHandler,
-  dryRun: boolean
+  onFileChangeBatch: FileChangeBatchHandler
 ): Promise<void> {
   // Clear any existing subscriptions first
   await teardownWatchSubscriptions();
 
-  // Register event listener BEFORE creating subscriptions to avoid missing events
-  watchmanClient.on('subscription', (resp: watchman.SubscriptionResponse) => {
-    // Check if this is one of our subscriptions
-    if (!resp.subscription.startsWith(WATCHMAN_SUB_NAME)) return;
-
-    // Log subscription event summary and full data for debugging
-    const fileCount = resp.files?.length ?? 0;
-    const isFresh = (resp as unknown as { is_fresh_instance?: boolean }).is_fresh_instance;
-    logger.debug(
-      `[watchman] subscription event: ${resp.subscription} (files: ${fileCount}, fresh: ${isFresh ?? false})`
-    );
-    logger.debug(`[watchman] subscription payload:\n${JSON.stringify(resp, null, 2)}`);
-
-    // Look up the configured source path from the subscription name
-    // This handles cases where Watchman's watch root differs from configured path
-    // (e.g., watching /Users/foo/Documents/lotsofstuff but Watchman returns root=/Users/foo/Documents)
-    const resolvedRoot = subscriptionToSourcePath.get(resp.subscription);
-
-    if (!resolvedRoot) {
-      logger.warn(`Ignoring event for unknown subscription: ${resp.subscription}`);
-      return;
-    }
-
-    // Verify the sync dir still exists in config (may have been removed)
-    const currentConfig = getConfig();
-    const syncDir = currentConfig.sync_dirs.find(
-      (d) => realpathSync(d.source_path) === resolvedRoot
-    );
-
-    if (!syncDir) {
-      // This can happen legitimately during config transitions
-      logger.warn(
-        `Ignoring event for removed sync dir: ${resolvedRoot} (subscription: ${resp.subscription})`
-      );
-      return;
-    }
-
-    // Process files as a batch
-    const fileChanges: FileChange[] = resp.files.map((file) => {
-      const fileChange = file as unknown as Omit<FileChange, 'watchRoot'>;
-      return { ...fileChange, watchRoot: resolvedRoot };
-    });
-
-    if (fileChanges.length > 0) {
-      onFileChangeBatch(fileChanges);
-    }
-
-    // Save the new clock so we don't see these events again on restart
-    const clock = (resp as unknown as { clock?: string }).clock;
-    if (clock) {
-      setClock(resolvedRoot, clock, dryRun);
-    }
-  });
-
-  // Handle errors
-  watchmanClient.on('error', (e: Error) => logger.error(`Watchman error: ${e}`));
-  watchmanClient.on('end', () => {});
+  // Store references for reconciliation
+  reconciliationConfig = config;
+  reconciliationCallback = onFileChangeBatch;
 
   // Set up watches for all configured directories
-  await Promise.all(
-    config.sync_dirs.map(async (dir) => {
-      const watchDir = realpathSync(dir.source_path);
-      const subName = `${WATCHMAN_SUB_NAME}-${basename(watchDir)}`;
+  for (const dir of config.sync_dirs) {
+    const watchDir = dir.source_path;
 
-      // Ensure .watchmanconfig exists with settle configuration before registering watch
-      ensureWatchmanConfig(watchDir);
+    if (!existsSync(watchDir)) {
+      logger.warn(`Sync directory does not exist, skipping watch: ${watchDir}`);
+      continue;
+    }
 
-      // Register directory with Watchman
-      const watchResp = await registerWithWatchman(watchDir);
-      const root = watchResp.watch;
-      const relative = watchResp.relative_path || '';
+    try {
+      const fsWatcher = watch(watchDir, { recursive: true }, (eventType, filename) => {
+        if (!filename) return;
 
-      logger.debug(
-        `[watchman] watch-project response for ${watchDir}: root=${root}, relative_path="${relative}"`
-      );
+        // Clear existing debounce timer for this path
+        const timerKey = `${watchDir}:${filename}`;
+        const existingTimer = debounceTimers.get(timerKey);
+        if (existingTimer) {
+          clearTimeout(existingTimer);
+        }
 
-      // Use saved clock for this directory or null for initial sync
-      const savedClock = getClock(watchDir);
+        // Set new debounce timer
+        const timer = setTimeout(() => {
+          debounceTimers.delete(timerKey);
+          handleDebouncedEvent(watchDir, filename, onFileChangeBatch);
+        }, WATCHER_DEBOUNCE_MS);
 
-      if (savedClock) {
-        logger.info(`Resuming ${dir.source_path} from last sync state...`);
-      } else {
-        logger.info(`First run - syncing all existing files in ${dir.source_path}...`);
-      }
-
-      // TODO: Re-enable settle parameters after debugging
-      const sub = buildWatchmanQuery({
-        savedClock,
-        relative,
+        debounceTimers.set(timerKey, timer);
       });
 
-      // Register subscription and store mapping for event routing
-      await subscribeWatchman(root, subName, sub);
-      activeSubscriptions.push({ root, subName });
-      subscriptionToSourcePath.set(subName, watchDir);
+      fsWatcher.on('error', (err) => {
+        logger.error(`Watcher error for ${watchDir}: ${err.message}`);
+      });
+
+      activeWatchers.set(watchDir, fsWatcher);
       logger.info(`Watching ${dir.source_path} for changes...`);
-    })
-  );
+    } catch (err) {
+      logger.error(
+        `Failed to watch ${watchDir}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  // Start incremental reconciliation timer
+  startReconciliationTimer();
 
   logger.info('Watching for file changes... (press Ctrl+C to exit)');
 }
 
 /**
- * Tear down all active Watchman subscriptions.
+ * Tear down all active watch subscriptions.
  * Call this before re-setting up subscriptions on config change.
  */
 export async function teardownWatchSubscriptions(): Promise<void> {
-  if (activeSubscriptions.length === 0) return;
+  // Stop reconciliation timer
+  stopReconciliationTimer();
+
+  // Clear debounce timers
+  for (const timer of debounceTimers.values()) {
+    clearTimeout(timer);
+  }
+  debounceTimers.clear();
+
+  // Close all watchers
+  if (activeWatchers.size === 0) return;
 
   logger.info('Tearing down watch subscriptions...');
 
-  // Remove subscription event listeners
-  watchmanClient.removeAllListeners('subscription');
+  for (const [watchDir, fsWatcher] of activeWatchers) {
+    try {
+      fsWatcher.close();
+      logger.debug(`Closed watcher for ${watchDir}`);
+    } catch (err) {
+      logger.warn(`Failed to close watcher for ${watchDir}: ${(err as Error).message}`);
+    }
+  }
 
-  // Unsubscribe from all active subscriptions
-  await Promise.all(
-    activeSubscriptions.map(async ({ root, subName }) => {
+  activeWatchers.clear();
+  dirtyPaths.clear();
+
+  // Clear reconciliation references
+  reconciliationConfig = null;
+  reconciliationCallback = null;
+}
+
+// ============================================================================
+// Incremental Reconciliation
+// ============================================================================
+
+/**
+ * Start the incremental reconciliation timer
+ */
+function startReconciliationTimer(): void {
+  if (reconciliationTimer) return;
+
+  reconciliationTimer = setInterval(() => {
+    runIncrementalReconciliation();
+  }, RECONCILIATION_INTERVAL_MS);
+}
+
+/**
+ * Stop the reconciliation timer
+ */
+function stopReconciliationTimer(): void {
+  if (reconciliationTimer) {
+    clearInterval(reconciliationTimer);
+    reconciliationTimer = null;
+  }
+}
+
+/**
+ * Run incremental reconciliation on dirty paths only
+ */
+function runIncrementalReconciliation(): void {
+  if (dirtyPaths.size === 0) {
+    logger.debug('[reconcile] No dirty paths to reconcile');
+    return;
+  }
+
+  if (!reconciliationCallback || !reconciliationConfig) {
+    logger.debug('[reconcile] No reconciliation callback configured');
+    return;
+  }
+
+  // Filter to paths that have been dirty for at least DIRTY_PATH_DEBOUNCE_MS
+  const now = Date.now();
+  const eligiblePaths: string[] = [];
+  for (const [fullPath, timestamp] of dirtyPaths) {
+    if (now - timestamp >= DIRTY_PATH_DEBOUNCE_MS) {
+      eligiblePaths.push(fullPath);
+    }
+  }
+
+  if (eligiblePaths.length === 0) {
+    logger.debug(
+      `[reconcile] ${dirtyPaths.size} dirty paths not yet eligible (debouncing for ${DIRTY_PATH_DEBOUNCE_MS / 1000}s)`
+    );
+    return;
+  }
+
+  logger.debug(`[reconcile] Running incremental reconciliation on ${eligiblePaths.length} paths`);
+
+  const changes: FileChange[] = [];
+
+  // Group dirty paths by watch root
+  const pathsByRoot = new Map<string, string[]>();
+  for (const fullPath of eligiblePaths) {
+    const watchDir = reconciliationConfig.sync_dirs.find((d) =>
+      fullPath.startsWith(d.source_path)
+    )?.source_path;
+
+    if (watchDir) {
+      const paths = pathsByRoot.get(watchDir) || [];
+      paths.push(fullPath);
+      pathsByRoot.set(watchDir, paths);
+    }
+  }
+
+  // Check each dirty path
+  for (const [watchDir, paths] of pathsByRoot) {
+    for (const fullPath of paths) {
+      const relativePath = relative(watchDir, fullPath);
+      const storedToken = getStoredChangeToken(fullPath);
+
       try {
-        await unsubscribeWatchman(root, subName);
-        logger.debug(`Unsubscribed from ${subName}`);
-      } catch (err) {
-        logger.warn(`Failed to unsubscribe from ${subName}: ${(err as Error).message}`);
-      }
-    })
-  );
+        if (existsSync(fullPath)) {
+          const stats = statSync(fullPath);
+          const currentToken = buildChangeToken(stats.mtimeMs, stats.size);
 
-  activeSubscriptions = [];
-  subscriptionToSourcePath.clear();
+          // Check if there's a discrepancy
+          if (!storedToken) {
+            // File exists but no change token stored - should have been created
+            changes.push({
+              name: relativePath,
+              size: stats.size,
+              mtime_ms: stats.mtimeMs,
+              exists: true,
+              type: stats.isDirectory() ? 'd' : 'f',
+              new: true,
+              watchRoot: watchDir,
+              ino: stats.ino,
+            });
+          } else if (storedToken !== currentToken && !stats.isDirectory()) {
+            // Token mismatch - should have been updated
+            changes.push({
+              name: relativePath,
+              size: stats.size,
+              mtime_ms: stats.mtimeMs,
+              exists: true,
+              type: 'f',
+              new: false,
+              watchRoot: watchDir,
+              ino: stats.ino,
+            });
+          }
+        } else if (storedToken) {
+          // File doesn't exist but change token is stored - should have been deleted
+          changes.push({
+            name: relativePath,
+            size: 0,
+            mtime_ms: Date.now(),
+            exists: false,
+            type: 'f',
+            new: false,
+            watchRoot: watchDir,
+            ino: 0,
+          });
+        }
+      } catch (err) {
+        logger.debug(
+          `[reconcile] Error checking ${fullPath}: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+  }
+
+  // Clear only the paths that were checked (eligible paths)
+  for (const fullPath of eligiblePaths) {
+    dirtyPaths.delete(fullPath);
+  }
+
+  // Emit any missed changes
+  if (changes.length > 0) {
+    logger.info(`[reconcile] Found ${changes.length} missed changes`);
+    reconciliationCallback(changes);
+  }
+}
+
+// ============================================================================
+// Full Reconciliation (for reconcile command)
+// ============================================================================
+
+/**
+ * Trigger a full filesystem reconciliation.
+ * Called by the reconcile CLI command via signal.
+ */
+export async function triggerFullReconciliation(
+  config: Config,
+  onFileChangeBatch: FileChangeBatchHandler
+): Promise<number> {
+  logger.info('Running full filesystem reconciliation...');
+
+  let totalChanges = 0;
+
+  for (const dir of config.sync_dirs) {
+    const watchDir = dir.source_path;
+
+    if (!existsSync(watchDir)) {
+      logger.warn(`Sync directory does not exist: ${watchDir}`);
+      continue;
+    }
+
+    // Get stored change tokens for this sync directory
+    const storedTokens = getAllStoredChangeTokens(watchDir);
+
+    // Scan the filesystem
+    const fsState = await scanDirectory(watchDir);
+
+    // Compare and generate changes
+    const changes = compareWithStoredChangeTokens(watchDir, fsState, storedTokens);
+
+    if (changes.length > 0) {
+      onFileChangeBatch(changes);
+      totalChanges += changes.length;
+    }
+  }
+
+  logger.info(`Full reconciliation complete: ${totalChanges} changes found`);
+  return totalChanges;
 }

@@ -5,10 +5,11 @@
  * Supports hot-reloading via namespaced signals (config:reload:<key>)
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
+
 import { logger } from './logger.js';
-import { getConfigDir } from './paths.js';
+import { getConfigDir, ensureDir, chownToEffectiveUser } from './paths.js';
 import { registerSignalHandler, sendSignal } from './signals.js';
 
 // ============================================================================
@@ -55,9 +56,7 @@ const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 export { CONFIG_DIR, CONFIG_FILE };
 
 export function ensureConfigDir(): void {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true });
-  }
+  ensureDir(CONFIG_DIR);
 }
 
 // ============================================================================
@@ -77,6 +76,7 @@ function parseConfig(exitOnError: boolean): Config | null {
       sync_concurrency: DEFAULT_SYNC_CONCURRENCY,
     };
     writeFileSync(CONFIG_FILE, JSON.stringify(defaultConfig, null, 2));
+    chownToEffectiveUser(CONFIG_FILE);
     logger.info(`Created default config file: ${CONFIG_FILE}`);
     return defaultConfig;
   }

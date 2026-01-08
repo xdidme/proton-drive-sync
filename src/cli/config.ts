@@ -14,6 +14,7 @@ import {
 } from '../config.js';
 import { isAlreadyRunning } from '../flags.js';
 import { logger } from '../logger.js';
+import { chownToEffectiveUser } from '../paths.js';
 import { startDashboard } from '../dashboard/server.js';
 
 // Valid config keys that can be set via CLI
@@ -97,5 +98,6 @@ function setConfigValues(pairs: string[]): void {
 
   // Write updated config
   writeFileSync(CONFIG_FILE, JSON.stringify(configData, null, 2));
+  chownToEffectiveUser(CONFIG_FILE);
   logger.info(`Config saved to ${CONFIG_FILE}`);
 }

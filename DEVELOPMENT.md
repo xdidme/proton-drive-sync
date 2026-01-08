@@ -2,11 +2,7 @@
 
 ## Requirements
 
-Run the install script first (see README) to install Watchman and other system dependencies. The install script is only needed to set up the required dependencies, so it can be exited before completion.
-
-### Additional requirements
-
-- [pywatchman](https://pypi.org/project/pywatchman/) (`pip install pywatchman`) - required on Linux and Windows for `make dev`
+- [Bun](https://bun.sh) - JavaScript runtime and package manager
 
 ## Setup
 
@@ -55,10 +51,21 @@ The GitHub Actions release workflow will automatically build binaries for all pl
 
 ## Installing Pre-release Versions
 
-To install a pre-release candidate (e.g., `v0.1.4-rc.1`):
+### Via Homebrew (macOS)
 
 ```bash
-bash <(curl -fsSL https://www.damianb.dev/proton-drive-sync/install.sh) --version v0.1.4-rc.1
+brew tap DamianB-BitFlipper/tap
+brew install proton-drive-sync-rc
 ```
 
-The version must include the `v` prefix and match an existing GitHub release tag.
+This installs the latest release candidate, alpha, or beta version.
+
+### Manual Installation
+
+Download the pre-release tarball for your platform from [GitHub Releases](https://github.com/DamianB-BitFlipper/proton-drive-sync/releases) and extract it:
+
+```bash
+# Example for macOS arm64
+tar -xzf proton-drive-sync-darwin-arm64.tar.gz
+sudo mv proton-drive-sync /usr/local/bin/
+```
