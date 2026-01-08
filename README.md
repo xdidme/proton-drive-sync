@@ -32,14 +32,12 @@ proton-drive-sync setup
 
 ### Fedora / RHEL / CentOS
 
-Download the appropriate `.rpm` file for your architecture from [GitHub Releases](https://github.com/DamianB-BitFlipper/proton-drive-sync/releases).
+Download the `.rpm` file for your architecture from [GitHub Releases](https://github.com/DamianB-BitFlipper/proton-drive-sync/releases).
 
 ```bash
-# For x86_64:
-sudo dnf install ./proton-drive-sync.x86_64.rpm
-
-# For aarch64:
-sudo dnf install ./proton-drive-sync.aarch64.rpm
+sudo dnf update
+sudo dnf install libsecret
+sudo dnf install ./<downloaded.rpm>
 
 proton-drive-sync setup
 ```

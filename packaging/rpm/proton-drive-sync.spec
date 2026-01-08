@@ -1,3 +1,8 @@
+# Disable rpmbuild binary processing - Bun executables are self-contained
+# and must not be modified by strip, build-id injection, etc.
+%global __os_install_post %{nil}
+%global __arch_install_post %{nil}
+
 Name:           proton-drive-sync
 Version:        %{_version}
 Release:        %{_release}
