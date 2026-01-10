@@ -9,7 +9,7 @@ import { db } from '../db/index.js';
 import { SyncEventType } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { registerSignalHandler } from '../signals.js';
-import { isPaused } from '../flags.js';
+import { isPaused, setFlag, FLAGS } from '../flags.js';
 import { sendStatusToDashboard } from '../dashboard/server.js';
 import { getConfig, onConfigChange, getExcludePatterns } from '../config.js';
 
@@ -304,6 +304,9 @@ export async function runWatchMode(options: SyncOptions): Promise<void> {
 
   // Set up file watching for future changes
   await setupWatchSubscriptions(config, createChangeHandler());
+
+  // Signal that startup is complete (daemon is ready)
+  setFlag(FLAGS.STARTUP_READY);
 
   // Wire up config change handlers
   onConfigChange('sync_concurrency', () => {

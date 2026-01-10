@@ -7,7 +7,15 @@
 import { getConfig, watchConfig } from '../config.js';
 import { logger, setDryRun } from '../logger.js';
 import { startSignalListener, stopSignalListener, registerSignalHandler } from '../signals.js';
-import { acquireRunLock, releaseRunLock, setFlag, isPaused, FLAGS } from '../flags.js';
+import {
+  acquireRunLock,
+  releaseRunLock,
+  setFlag,
+  isPaused,
+  FLAGS,
+  clearFlag,
+  isStartupReady,
+} from '../flags.js';
 import { getStoredCredentials, createClientFromTokens, type ProtonDriveClient } from './auth.js';
 import { startDashboard, stopDashboard, sendStatusToDashboard } from '../dashboard/server.js';
 import {
@@ -97,10 +105,10 @@ async function authenticateWithStatus(sdkDebug = false): Promise<ProtonDriveClie
 // ============================================================================
 
 /**
- * Spawn a detached background process (daemon) and exit.
- * The child process runs with --no-daemon to execute the actual sync.
+ * Spawn a detached background process (daemon) and wait for it to be ready.
+ * Prints progress dots while waiting, inherits stderr for error visibility.
  */
-function spawnDaemon(options: StartOptions): void {
+async function spawnDaemon(options: StartOptions): Promise<void> {
   const args = ['start', '--no-daemon'];
 
   // Forward relevant flags to the daemon process
@@ -110,17 +118,48 @@ function spawnDaemon(options: StartOptions): void {
   if (options.sdkDebug) args.push('--sdk-debug');
   if (options.paused) args.push('--paused');
 
+  // Clear any stale startup_ready flag from previous run
+  clearFlag(FLAGS.STARTUP_READY);
+
   const child = Bun.spawn(['proton-drive-sync', ...args], {
     detached: true,
-    stdio: ['ignore', 'ignore', 'ignore'],
+    stdio: ['ignore', 'ignore', 'inherit'], // stderr inherited for error visibility
     env: { ...process.env },
   });
 
   // Unref so parent can exit without waiting for child
   child.unref();
+  const pid = child.pid;
 
-  logger.info(`Started daemon process (PID: ${child.pid})`);
-  process.exit(0);
+  // Print initial message without newline, then dots while waiting
+  process.stdout.write(`info: Starting daemon process (PID: ${pid})`);
+
+  const maxWaitSeconds = 30;
+  for (let i = 0; i < maxWaitSeconds; i++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    process.stdout.write('.');
+
+    if (isStartupReady()) {
+      process.stdout.write('\n');
+      logger.info('Daemon started successfully');
+      process.exit(0);
+    }
+
+    // Check if process died
+    try {
+      process.kill(pid, 0);
+    } catch {
+      process.stdout.write('\n');
+      logger.error('Daemon process exited unexpectedly');
+      logger.info('Check logs with: proton-drive-sync logs');
+      process.exit(1);
+    }
+  }
+
+  process.stdout.write('\n');
+  logger.error('Daemon did not start within 30 seconds');
+  logger.info('Check logs with: proton-drive-sync logs');
+  process.exit(1);
 }
 
 /**
@@ -152,7 +191,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
   // Daemonize: spawn background process and exit
   // Commander's --no-daemon sets daemon=false, default is true
   if (options.daemon !== false) {
-    spawnDaemon(options);
+    await spawnDaemon(options);
     return;
   }
 

@@ -13,6 +13,7 @@ export const FLAGS = {
   ONBOARDING: 'onboarding', // Data: 'about' or 'completed'
   SERVICE_INSTALLED: 'service_installed',
   SERVICE_LOADED: 'service_loaded',
+  STARTUP_READY: 'startup_ready', // Set after auth + watcher initialization complete
 } as const;
 
 // Onboarding states (used as data for ONBOARDING flag)
@@ -162,6 +163,13 @@ export function isPaused(): boolean {
 }
 
 /**
+ * Check if the daemon has completed startup (auth + watcher ready).
+ */
+export function isStartupReady(): boolean {
+  return hasFlag(FLAGS.STARTUP_READY);
+}
+
+/**
  * Acquire the run lock: checks if another instance is running and marks this process as running.
  * Returns true if lock acquired, false if another instance is already running.
  * If a stale lock exists (process no longer running), it will be cleared and lock acquired.
@@ -196,6 +204,7 @@ export function acquireRunLock(): boolean {
  * Should be called during graceful shutdown.
  */
 export function releaseRunLock(): void {
+  clearFlag(FLAGS.STARTUP_READY);
   clearFlag(RUNNING_PID_FLAG, ALL_VARIANTS);
   clearFlag(FLAGS.PAUSED);
 }
