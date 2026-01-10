@@ -11,7 +11,7 @@ import { select, confirm } from '@inquirer/prompts';
 import { existsSync } from 'fs';
 
 import { getStoredCredentials } from '../keychain.js';
-import { isAlreadyRunning } from '../flags.js';
+import { isAlreadyRunning, isStartupReady } from '../flags.js';
 import { logger } from '../logger.js';
 import { getConfig, DEFAULT_DASHBOARD_PORT } from '../config.js';
 import { getEffectiveHome } from '../paths.js';
@@ -274,7 +274,7 @@ async function waitForServiceAndOpenDashboard(): Promise<void> {
   let running = false;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    running = await isAlreadyRunning();
+    running = isStartupReady();
     if (running) break;
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
