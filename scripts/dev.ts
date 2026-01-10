@@ -18,10 +18,10 @@ import { join, extname } from 'path';
 // ============================================================================
 
 const WATCH_DIR = 'src';
-const WATCH_EXTENSIONS = new Set(['.ts', '.tsx', '.html', '.css', '.json']);
+const WATCH_EXTENSIONS = new Set(['.ts', '.tsx', '.html', '.css', '.json', '.txt', '.sql']);
 const DEBOUNCE_MS = 300;
 const BUILD_COMMAND = ['make', 'build'];
-const APP_COMMAND = ['proton-drive-sync', 'start', '--no-daemon'];
+const APP_COMMAND = ['proton-drive-sync'];
 
 // ============================================================================
 // State

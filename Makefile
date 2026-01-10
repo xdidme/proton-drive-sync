@@ -52,7 +52,7 @@ help:
 	@echo "  make build        - Build standalone binary with bun"
 	@echo "  make build-check  - Type-check without emitting files"
 	@echo "  make run ARGS=\"\" - Run directly with bun (one-off commands)"
-	@echo "  make dev          - Run in watch mode (auto-reload on file changes)"
+	@echo "  make dev ARGS=\"\" - Run in watch mode (auto-reload on file changes)"
 	@echo "  make pre-commit   - Run pre-commit checks on all files"
 	@echo "  make publish      - Publish to npm"
 	@echo "  make clean        - Clean build artifacts"

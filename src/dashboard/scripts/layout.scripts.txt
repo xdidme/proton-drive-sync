@@ -38,31 +38,29 @@
     }, duration);
   }
 
-  // Store SSE EventSource reference for cleanup
-  let sseSource = null;
+  // Store ALL SSE EventSource references for cleanup (home page has two: /api/events and /api/logs)
+  const sseSources = new Set();
 
-  // Capture the EventSource when connection opens
+  // Capture each EventSource when connections open
   document.body.addEventListener('htmx:sseOpen', (e) => {
-    sseSource = e.detail.source;
+    sseSources.add(e.detail.source);
   });
 
-  // Close SSE before navigating to prevent connection pile-up
-  document.querySelectorAll('a[href^="/"]').forEach((link) => {
-    link.addEventListener('click', () => {
-      if (sseSource) {
-        sseSource.close();
-        sseSource = null;
-      }
-    });
+  // Close all SSE connections to prevent browser hanging on navigation
+  function closeAllSSE() {
+    sseSources.forEach((source) => source.close());
+    sseSources.clear();
+  }
+
+  // Event delegation for internal link clicks (works for dynamically added links too)
+  document.body.addEventListener('click', (e) => {
+    if (e.target.closest('a[href^="/"]')) {
+      closeAllSSE();
+    }
   });
 
   // Also close on page unload (e.g., refresh, external navigation)
-  window.addEventListener('beforeunload', () => {
-    if (sseSource) {
-      sseSource.close();
-      sseSource = null;
-    }
-  });
+  window.addEventListener('beforeunload', closeAllSSE);
 
   // Pulse the heartbeat dot on each heartbeat event
   document.body.addEventListener('heartbeat-received', () => {
