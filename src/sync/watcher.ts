@@ -9,9 +9,10 @@ import { watch, type FSWatcher, statSync, existsSync } from 'fs';
 import { join, relative } from 'path';
 import { eq, like } from 'drizzle-orm';
 import { logger } from '../logger.js';
-import { type Config } from '../config.js';
+import { type Config, type ExcludePattern, getExcludePatterns } from '../config.js';
 import { db } from '../db/index.js';
 import { fileState } from '../db/schema.js';
+import { isPathExcluded } from './exclusions.js';
 import {
   WATCHER_DEBOUNCE_MS,
   RECONCILIATION_INTERVAL_MS,
@@ -102,10 +103,12 @@ function getAllStoredChangeTokens(syncDirPath: string): Map<string, string> {
 // ============================================================================
 
 /**
- * Scan a directory recursively and return all files/directories with their stats
+ * Scan a directory recursively and return all files/directories with their stats.
+ * Filters out paths matching exclusion patterns.
  */
 export async function scanDirectory(
-  watchDir: string
+  watchDir: string,
+  excludePatterns: ExcludePattern[]
 ): Promise<Map<string, { size: number; mtime_ms: number; isDirectory: boolean; ino: number }>> {
   const results = new Map<
     string,
@@ -119,6 +122,13 @@ export async function scanDirectory(
 
     for (const entry of entries) {
       const fullPath = join(watchDir, entry);
+
+      // Skip excluded paths
+      if (isPathExcluded(fullPath, watchDir, excludePatterns)) {
+        logger.debug(`[scan] Skipping excluded path: ${entry}`);
+        continue;
+      }
+
       try {
         const stats = statSync(fullPath);
         results.set(fullPath, {
@@ -245,6 +255,7 @@ export async function queryAllChanges(
   onFileChangeBatch: FileChangeBatchHandler
 ): Promise<number> {
   let totalChanges = 0;
+  const excludePatterns = getExcludePatterns();
 
   for (const dir of config.sync_dirs) {
     const watchDir = dir.source_path;
@@ -264,8 +275,8 @@ export async function queryAllChanges(
       logger.info(`First run - syncing all existing files in ${dir.source_path}...`);
     }
 
-    // Scan the filesystem
-    const fsState = await scanDirectory(watchDir);
+    // Scan the filesystem (with exclusion filtering)
+    const fsState = await scanDirectory(watchDir, excludePatterns);
 
     // Compare and generate changes
     const changes = compareWithStoredChangeTokens(watchDir, fsState, storedTokens);
@@ -606,6 +617,7 @@ export async function triggerFullReconciliation(
   logger.info('Running full filesystem reconciliation...');
 
   let totalChanges = 0;
+  const excludePatterns = getExcludePatterns();
 
   for (const dir of config.sync_dirs) {
     const watchDir = dir.source_path;
@@ -618,8 +630,8 @@ export async function triggerFullReconciliation(
     // Get stored change tokens for this sync directory
     const storedTokens = getAllStoredChangeTokens(watchDir);
 
-    // Scan the filesystem
-    const fsState = await scanDirectory(watchDir);
+    // Scan the filesystem (with exclusion filtering)
+    const fsState = await scanDirectory(watchDir, excludePatterns);
 
     // Compare and generate changes
     const changes = compareWithStoredChangeTokens(watchDir, fsState, storedTokens);

@@ -10,7 +10,7 @@ import { db } from '../db/index.js';
 import { createNode } from '../proton/create.js';
 import { deleteNode } from '../proton/delete.js';
 import { logger } from '../logger.js';
-import { DEFAULT_SYNC_CONCURRENCY } from '../config.js';
+import { DEFAULT_SYNC_CONCURRENCY, getExcludePatterns } from '../config.js';
 import type { ProtonDriveClient } from '../proton/types.js';
 import {
   type Job,
@@ -239,7 +239,8 @@ async function processJob(client: ProtonDriveClient, job: Job, dryRun: boolean):
         });
 
         // Step 3: Scan children and queue jobs for unsynced items
-        const fsState = await scanDirectory(localPath);
+        const excludePatterns = getExcludePatterns();
+        const fsState = await scanDirectory(localPath, excludePatterns);
 
         db.transaction((tx) => {
           for (const [childPath, stats] of fsState) {

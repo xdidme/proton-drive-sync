@@ -21,11 +21,17 @@ export interface SyncDir {
   remote_root: string;
 }
 
+export interface ExcludePattern {
+  path: string; // "/" for global (all sync dirs), or absolute path
+  globs: string[];
+}
+
 export interface Config {
   sync_dirs: SyncDir[];
   sync_concurrency: number;
   dashboard_host?: string;
   dashboard_port?: number;
+  exclude_patterns?: ExcludePattern[];
 }
 
 /** Config keys that can be watched for changes */
@@ -66,9 +72,10 @@ export function ensureConfigDir(): void {
 let currentConfig: Config | null = null;
 
 /**
- * Parse and validate config from file. Returns null if invalid.
+ * Parse and validate config from file.
+ * @param throwOnError - If true, throws on error. If false, returns null.
  */
-function parseConfig(exitOnError: boolean): Config | null {
+function parseConfig(throwOnError: boolean): Config | null {
   if (!existsSync(CONFIG_FILE)) {
     ensureConfigDir();
     const defaultConfig: Config = {
@@ -89,9 +96,8 @@ function parseConfig(exitOnError: boolean): Config | null {
       config.sync_dirs = [];
     } else if (!Array.isArray(config.sync_dirs)) {
       const msg = 'Config "sync_dirs" must be an array';
-      if (exitOnError) {
-        logger.error(msg);
-        process.exit(1);
+      if (throwOnError) {
+        throw new Error(msg);
       }
       logger.error(msg);
       return null;
@@ -106,22 +112,18 @@ function parseConfig(exitOnError: boolean): Config | null {
     for (const dir of config.sync_dirs) {
       if (typeof dir === 'string') {
         const msg =
-          'Config sync_dirs must be objects with "source_path" and "remote_root" properties';
-        if (exitOnError) {
-          logger.error(msg);
-          logger.error(
-            'Example: {"sync_dirs": [{"source_path": "/path/to/dir", "remote_root": "/backup"}]}'
-          );
-          process.exit(1);
+          'Config sync_dirs must be objects with "source_path" and "remote_root" properties. ' +
+          'Example: {"sync_dirs": [{"source_path": "/path/to/dir", "remote_root": "/backup"}]}';
+        if (throwOnError) {
+          throw new Error(msg);
         }
         logger.error(msg);
         return null;
       }
       if (!dir.source_path) {
         const msg = 'Each sync_dirs entry must have a "source_path" property';
-        if (exitOnError) {
-          console.error(msg);
-          process.exit(1);
+        if (throwOnError) {
+          throw new Error(msg);
         }
         logger.error(msg);
         return null;
@@ -136,9 +138,8 @@ function parseConfig(exitOnError: boolean): Config | null {
 
       if (!existsSync(dir.source_path)) {
         const msg = `Sync directory does not exist: ${dir.source_path}`;
-        if (exitOnError) {
-          console.error(msg);
-          process.exit(1);
+        if (throwOnError) {
+          throw new Error(msg);
         }
         logger.error(msg);
         return null;
@@ -147,6 +148,11 @@ function parseConfig(exitOnError: boolean): Config | null {
 
     return config;
   } catch (error) {
+    // Re-throw our own errors
+    if (error instanceof Error && !('code' in error)) {
+      throw error;
+    }
+
     let msg: string;
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       msg = `Config file not found: ${CONFIG_FILE}`;
@@ -155,9 +161,8 @@ function parseConfig(exitOnError: boolean): Config | null {
     } else {
       msg = `Error reading config: ${(error as Error).message}`;
     }
-    if (exitOnError) {
-      console.error(msg);
-      process.exit(1);
+    if (throwOnError) {
+      throw new Error(msg);
     }
     logger.error(msg);
     return null;
@@ -165,34 +170,28 @@ function parseConfig(exitOnError: boolean): Config | null {
 }
 
 /**
- * Load config from file. Exits process if config is invalid on first load.
+ * Get the current config. Auto-loads on first call.
+ * Throws an error if config is invalid.
  */
-export function loadConfig(): Config {
-  if (currentConfig) {
-    return currentConfig;
+export function getConfig(): Config {
+  if (!currentConfig) {
+    currentConfig = parseConfig(true)!;
   }
-  currentConfig = parseConfig(true)!;
   return currentConfig;
 }
 
 /**
- * Get the current config. Must call loadConfig() first.
+ * Get exclusion patterns from config, guaranteed to return an array.
  */
-export function getConfig(): Config {
-  if (!currentConfig) {
-    throw new Error('Config not loaded. Call loadConfig() first.');
-  }
-  return currentConfig;
+export function getExcludePatterns(): ExcludePattern[] {
+  return getConfig().exclude_patterns ?? [];
 }
 
 /**
  * Check if a path is within any of the configured sync directories.
  */
 export function isPathWatched(localPath: string): boolean {
-  if (!currentConfig) {
-    return false;
-  }
-  return currentConfig.sync_dirs.some((dir) => localPath.startsWith(dir.source_path));
+  return getConfig().sync_dirs.some((dir) => localPath.startsWith(dir.source_path));
 }
 
 /** Check if two values are deeply equal (for sync_dirs array comparison) */
@@ -217,7 +216,13 @@ function reloadConfig(): void {
   if (!oldConfig) return;
 
   // Send signals for keys that changed
-  const keys: ConfigKey[] = ['sync_dirs', 'sync_concurrency', 'dashboard_host', 'dashboard_port'];
+  const keys: ConfigKey[] = [
+    'sync_dirs',
+    'sync_concurrency',
+    'dashboard_host',
+    'dashboard_port',
+    'exclude_patterns',
+  ];
   for (const key of keys) {
     if (!isEqual(oldConfig[key], newConfig[key])) {
       logger.debug(`Config key "${key}" changed, sending signal`);
