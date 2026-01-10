@@ -6,9 +6,13 @@ import { Icon } from './Icon.js';
 type Props = {
   jobs: DashboardJob[];
   count: number;
+  limit: number;
 };
 
-export const RetryQueue: FC<Props> = ({ jobs, count }) => {
+export const RetryQueue: FC<Props> = ({ jobs, count, limit }) => {
+  const displayJobs = jobs.slice(0, limit);
+  const isTruncated = jobs.length > limit;
+
   return (
     <>
       {/* Header */}
@@ -37,21 +41,24 @@ export const RetryQueue: FC<Props> = ({ jobs, count }) => {
 
       {/* List */}
       <div class="flex-1 overflow-y-auto custom-scrollbar p-2">
-        {jobs.length === 0 ? (
+        {displayJobs.length === 0 ? (
           <div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
             <Icon name="circle-check" class="w-10 h-10 opacity-20" />
             <p class="text-sm">No scheduled retries</p>
           </div>
         ) : (
           <div class="space-y-1">
-            {jobs.map((job) => {
+            {displayJobs.map((job) => {
               const retryAtIso = job.retryAt
                 ? typeof job.retryAt === 'string'
                   ? job.retryAt
                   : job.retryAt.toISOString()
                 : '';
               return (
-                <div class="px-3 py-2 rounded-lg hover:bg-gray-700/50 transition-colors flex items-center gap-3">
+                <div
+                  id={`retry-${job.id}`}
+                  class="px-3 py-2 rounded-lg hover:bg-gray-700/50 transition-colors flex items-center gap-3"
+                >
                   <Icon name="refresh-cw" class="w-4 h-4 text-orange-500 shrink-0" />
                   <div class="min-w-0 flex-1 flex items-center justify-between gap-4">
                     <span class="text-xs font-mono text-gray-300 truncate">
@@ -68,6 +75,15 @@ export const RetryQueue: FC<Props> = ({ jobs, count }) => {
           </div>
         )}
       </div>
+
+      {/* Truncation footer */}
+      {isTruncated && (
+        <div class="px-5 py-2 border-t border-gray-700 bg-gray-800/30">
+          <span class="text-xs text-gray-500">
+            Showing {displayJobs.length} of {count}
+          </span>
+        </div>
+      )}
     </>
   );
 };

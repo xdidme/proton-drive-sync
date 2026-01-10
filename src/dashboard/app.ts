@@ -36,7 +36,6 @@ import {
 } from '../config.js';
 import {
   type AuthStatusUpdate,
-  type DashboardDiff,
   type DashboardJob,
   type DashboardStatus,
   type SyncStatus,
@@ -47,7 +46,8 @@ import {
 } from './ipc.js';
 import type { Config } from '../config.js';
 
-import type { JobCounts } from './views/fragments/types.js';
+/** Maximum number of items to display in each queue (for DOM performance) */
+const QUEUE_DISPLAY_LIMIT = 100;
 
 // TSX Fragment Components
 import { Stats } from './views/fragments/Stats.js';
@@ -177,9 +177,6 @@ let currentSyncStatus: SyncStatus = 'disconnected';
 let currentConfig: Config | null = null;
 let loggedAuthUser: string | null = null; // Track logged auth to avoid duplicate logs
 
-/** Cached job counts - initialized on first SSE connection, updated via diffs */
-let cachedCounts: JobCounts | null = null;
-
 /**
  * Read and process messages from parent process via stdin.
  * Messages are newline-delimited JSON.
@@ -215,8 +212,8 @@ async function readParentMessages(): Promise<void> {
     const msg = parseMessage<ParentMessage>(line);
     if (!msg) continue;
 
-    if (msg.type === 'job_state_diff') {
-      stateDiffEvents.emit('job_state_diff', msg.diff);
+    if (msg.type === 'job_refresh') {
+      stateDiffEvents.emit('job_refresh');
     } else if (msg.type === 'config') {
       if (msg.dryRun !== undefined) isDryRun = msg.dryRun;
       if (msg.config) currentConfig = msg.config;
@@ -263,27 +260,28 @@ function renderProcessingQueue(jobs: DashboardJob[], count: number): string {
     count,
     syncStatus: currentSyncStatus,
     authStatus: currentAuthStatus,
+    limit: QUEUE_DISPLAY_LIMIT,
   })!.toString();
 }
 
 /** Render blocked queue HTML (header + list) */
 function renderBlockedQueue(jobs: DashboardJob[], count: number): string {
-  return BlockedQueue({ jobs, count })!.toString();
+  return BlockedQueue({ jobs, count, limit: QUEUE_DISPLAY_LIMIT })!.toString();
 }
 
 /** Render recent queue HTML (header + list) */
 function renderRecentQueue(jobs: DashboardJob[], count: number): string {
-  return RecentQueue({ jobs, count })!.toString();
+  return RecentQueue({ jobs, count, limit: QUEUE_DISPLAY_LIMIT })!.toString();
 }
 
 /** Render pending queue HTML (header + list) */
 function renderPendingQueue(jobs: DashboardJob[], count: number): string {
-  return PendingQueue({ jobs, count })!.toString();
+  return PendingQueue({ jobs, count, limit: QUEUE_DISPLAY_LIMIT })!.toString();
 }
 
 /** Render retry queue HTML (header with button + list) */
 function renderRetryQueue(jobs: DashboardJob[], count: number): string {
-  return RetryQueue({ jobs, count })!.toString();
+  return RetryQueue({ jobs, count, limit: QUEUE_DISPLAY_LIMIT })!.toString();
 }
 
 /** Render auth status HTML */
@@ -1151,15 +1149,7 @@ app.get('/api/events', async (c) => {
 
     // Initial full push - get full state from DB
     const initialSnapshot = snapshot();
-    cachedCounts = { ...initialSnapshot.counts }; // Cache initial counts from DB
     lastProcessing = processingIds(initialSnapshot.processing);
-
-    // In-memory job lists - initialized from snapshot, updated via diffs
-    let cachedProcessing = [...initialSnapshot.processing];
-    let cachedBlocked = [...initialSnapshot.blocked];
-    let cachedPending = [...initialSnapshot.pending];
-    let cachedRecent = [...initialSnapshot.recent];
-    let cachedRetry = [...initialSnapshot.retry];
 
     pushFragments(stream, initialSnapshot, [
       FRAG.stats,
@@ -1180,19 +1170,6 @@ app.get('/api/events', async (c) => {
       FRAG.welcomeModal,
     ]);
 
-    // Helper to apply list diffs (add items, remove by id)
-    const applyListDiff = (
-      list: DashboardJob[],
-      add: DashboardJob[],
-      removeIds: number[]
-    ): DashboardJob[] => {
-      // Remove items by id
-      const removeSet = new Set(removeIds);
-      const filtered = list.filter((job) => !removeSet.has(job.id));
-      // Add new items
-      return [...filtered, ...add];
-    };
-
     // Debounce pushing fragments to the SSE stream
     const FRAGMENT_DEBOUNCE_MS = 100;
     let fragmentDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1200,22 +1177,11 @@ app.get('/api/events', async (c) => {
     const flushFragments = () => {
       fragmentDebounceTimer = null;
 
-      // Build snapshot with cached counts and lists (no DB queries)
-      const s: DashboardSnapshot = {
-        counts: cachedCounts || getJobCounts(),
-        processing: cachedProcessing,
-        blocked: cachedBlocked,
-        pending: cachedPending,
-        recent: cachedRecent,
-        retry: cachedRetry,
-        auth: currentAuthStatus,
-        syncStatus: currentSyncStatus,
-        dryRun: isDryRun,
-        config: currentConfig,
-      };
+      // Query fresh state from DB
+      const s = snapshot();
       const curProcessing = processingIds(s.processing);
 
-      // Always push stats & non-heavy lists
+      // Always push stats & all queues
       pushFragments(stream, s, [
         FRAG.stats,
         FRAG.blockedQueue,
@@ -1231,34 +1197,8 @@ app.get('/api/events', async (c) => {
       }
     };
 
-    // Job diff: apply deltas to cached counts and lists, debounce fragment push
-    const onJobDiff = (diff: DashboardDiff) => {
-      // Apply deltas to cached counts (avoid DB query for counts)
-      if (cachedCounts) {
-        cachedCounts.pending += diff.statsDelta.pending;
-        cachedCounts.processing += diff.statsDelta.processing;
-        cachedCounts.synced += diff.statsDelta.synced;
-        cachedCounts.blocked += diff.statsDelta.blocked;
-        cachedCounts.retry += diff.statsDelta.retry;
-        // Derive pendingReady from pending - retry
-        cachedCounts.pendingReady = cachedCounts.pending - cachedCounts.retry;
-
-        // Ensure non-negative values
-        cachedCounts.pending = Math.max(0, cachedCounts.pending);
-        cachedCounts.pendingReady = Math.max(0, cachedCounts.pendingReady);
-        cachedCounts.processing = Math.max(0, cachedCounts.processing);
-        cachedCounts.synced = Math.max(0, cachedCounts.synced);
-        cachedCounts.blocked = Math.max(0, cachedCounts.blocked);
-        cachedCounts.retry = Math.max(0, cachedCounts.retry);
-      }
-
-      // Apply diffs to in-memory job lists
-      cachedProcessing = applyListDiff(cachedProcessing, diff.addProcessing, diff.removeProcessing);
-      cachedBlocked = [...cachedBlocked, ...diff.addBlocked]; // append-only
-      cachedPending = applyListDiff(cachedPending, diff.addPending, diff.removePending);
-      cachedRecent = [...diff.addRecent, ...cachedRecent]; // prepend new items (newest first)
-      cachedRetry = applyListDiff(cachedRetry, diff.addRetry, diff.removeRetry);
-
+    // Job refresh: debounce fragment push (queries DB fresh each time)
+    const onJobRefresh = () => {
       // Debounce the fragment push
       if (!fragmentDebounceTimer) {
         fragmentDebounceTimer = setTimeout(flushFragments, FRAGMENT_DEBOUNCE_MS);
@@ -1290,13 +1230,13 @@ app.get('/api/events', async (c) => {
       stream.writeSSE({ event: 'heartbeat', data: '' });
     };
 
-    stateDiffEvents.on('job_state_diff', onJobDiff);
+    stateDiffEvents.on('job_refresh', onJobRefresh);
     statusEvents.on('status', onStatus);
     heartbeatEvents.on('heartbeat', onHeartbeat);
 
     stream.onAbort(() => {
       if (fragmentDebounceTimer) clearTimeout(fragmentDebounceTimer);
-      stateDiffEvents.off('job_state_diff', onJobDiff);
+      stateDiffEvents.off('job_refresh', onJobRefresh);
       statusEvents.off('status', onStatus);
       heartbeatEvents.off('heartbeat', onHeartbeat);
     });

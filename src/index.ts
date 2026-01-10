@@ -59,8 +59,8 @@ program
   .command('reset')
   .description('Reset sync state')
   .option('-y, --yes', 'Skip confirmation prompt')
-  .option('--signals', 'Clear only the signals table')
-  .option('--retries', 'Remove only sync jobs pending retry')
+  .option('--only-signals', 'Clear only the signals table')
+  .option('--only-retries', 'Remove only sync jobs pending retry')
   .option('--purge', 'Delete all data, credentials, and uninstall service')
   .action(resetCommand);
 

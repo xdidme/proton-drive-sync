@@ -14,15 +14,15 @@ import { serviceUninstallCommand } from './service/index.js';
 
 export async function resetCommand(options: {
   yes: boolean;
-  signals: boolean;
-  retries: boolean;
+  onlySignals: boolean;
+  onlyRetries: boolean;
   purge: boolean;
 }): Promise<void> {
-  const { yes, signals: signalsOnly, retries: retriesOnly, purge } = options;
+  const { yes, onlySignals, onlyRetries, purge } = options;
 
-  // --purge is mutually exclusive with --signals and --retries
-  if (purge && (signalsOnly || retriesOnly)) {
-    logger.error('--purge cannot be used with --signals or --retries');
+  // --purge is mutually exclusive with --only-signals and --only-retries
+  if (purge && (onlySignals || onlyRetries)) {
+    logger.error('--purge cannot be used with --only-signals or --only-retries');
     process.exit(1);
   }
 
@@ -33,10 +33,10 @@ export async function resetCommand(options: {
 
   if (!yes) {
     let message: string;
-    if (retriesOnly) {
+    if (onlyRetries) {
       message =
         'This will clear the retry delay for all pending retry jobs so they get picked up immediately. Continue?';
-    } else if (signalsOnly) {
+    } else if (onlySignals) {
       message = 'This will clear all signals from the database. Continue?';
     } else {
       message =
@@ -54,12 +54,12 @@ export async function resetCommand(options: {
     }
   }
 
-  if (retriesOnly) {
+  if (onlyRetries) {
     const result = run(
       db.update(schema.syncJobs).set({ retryAt: new Date() }).where(gt(schema.syncJobs.nRetries, 0))
     );
     logger.info(`Cleared retry delay for ${result.changes} job(s).`);
-  } else if (signalsOnly) {
+  } else if (onlySignals) {
     db.delete(schema.signals).run();
     logger.info('Signals cleared.');
   } else {

@@ -10,11 +10,14 @@ type Props = {
   count: number;
   syncStatus: SyncStatus;
   authStatus: AuthStatusUpdate;
+  limit: number;
 };
 
-export const ProcessingQueue: FC<Props> = ({ jobs, count, syncStatus, authStatus }) => {
+export const ProcessingQueue: FC<Props> = ({ jobs, count, syncStatus, authStatus, limit }) => {
   const isPaused = syncStatus === 'paused';
   const isActive = syncStatus === 'syncing' && authStatus.status === 'authenticated';
+  const displayJobs = jobs.slice(0, limit);
+  const isTruncated = jobs.length > limit;
 
   return (
     <>
@@ -39,15 +42,18 @@ export const ProcessingQueue: FC<Props> = ({ jobs, count, syncStatus, authStatus
 
       {/* List */}
       <div class="flex-1 overflow-y-auto custom-scrollbar p-2">
-        {jobs.length === 0 ? (
+        {displayJobs.length === 0 ? (
           <div class="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
             <Icon name="zap" class="w-10 h-10 opacity-20" />
             <p class="text-sm">Queue is empty</p>
           </div>
         ) : (
           <div class="space-y-1">
-            {jobs.map((job) => (
-              <div class="px-3 py-2.5 rounded-lg bg-gray-900/50 border border-gray-700/50 hover:border-blue-500/30 transition-colors group">
+            {displayJobs.map((job) => (
+              <div
+                id={`processing-${job.id}`}
+                class="px-3 py-2.5 rounded-lg bg-gray-900/50 border border-gray-700/50 hover:border-blue-500/30 transition-colors group"
+              >
                 <div class="flex items-start gap-3">
                   {isActive ? (
                     <Icon name="refresh-cw" class="w-4 h-4 text-blue-500 mt-0.5 shrink-0 js-spin" />
@@ -66,6 +72,15 @@ export const ProcessingQueue: FC<Props> = ({ jobs, count, syncStatus, authStatus
           </div>
         )}
       </div>
+
+      {/* Truncation footer */}
+      {isTruncated && (
+        <div class="px-5 py-2 border-t border-gray-700 bg-gray-800/30">
+          <span class="text-xs text-gray-500">
+            Showing {displayJobs.length} of {count}
+          </span>
+        </div>
+      )}
     </>
   );
 };

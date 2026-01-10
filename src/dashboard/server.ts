@@ -13,11 +13,8 @@ import {
   type AuthStatusUpdate,
   type SyncStatus,
   type DashboardStatus,
-  type DashboardJob,
-  type DashboardDiff,
   type ParentMessage,
   type ChildMessage,
-  createEmptyDiff,
   parseMessage,
 } from './ipc.js';
 
@@ -28,81 +25,11 @@ export type {
   SyncStatus,
   DashboardStatus,
   DashboardJob,
-  DashboardDiff,
 } from './ipc.js';
 
 // ============================================================================
 // Constants
 // ============================================================================
-
-// ============================================================================
-// Event Accumulation
-// ============================================================================
-
-/**
- * Accumulate a job event into a diff.
- *
- * Event types and their effects on stats:
- * - enqueue: pending++ (job added to queue)
- * - processing: pending--, processing++ (job picked up for processing)
- * - synced: processing--, synced++ (job completed)
- * - blocked: processing--, blocked++ (job failed permanently)
- * - retry: processing--, pending++ (job scheduled for retry)
- */
-function accumulateEventIntoDiff(event: JobEvent, diff: DashboardDiff): void {
-  const job: DashboardJob = {
-    id: event.jobId,
-    localPath: event.localPath,
-    remotePath: event.remotePath,
-    createdAt: event.timestamp,
-  };
-
-  switch (event.type) {
-    case 'enqueue':
-      diff.statsDelta.pending++;
-      diff.addPending.push(job);
-      break;
-
-    case 'processing':
-      diff.statsDelta.pending--;
-      diff.statsDelta.processing++;
-      if (event.wasRetry) {
-        diff.statsDelta.retry--;
-        diff.removeRetry.push(event.jobId);
-      }
-      diff.removePending.push(event.jobId);
-      diff.addProcessing.push(job);
-      break;
-
-    case 'synced':
-      diff.statsDelta.processing--;
-      diff.statsDelta.synced++;
-      diff.removeProcessing.push(event.jobId);
-      diff.addRecent.push(job);
-      break;
-
-    case 'blocked':
-      diff.statsDelta.processing--;
-      diff.statsDelta.blocked++;
-      diff.removeProcessing.push(event.jobId);
-      diff.addBlocked.push({
-        ...job,
-        lastError: event.error,
-      });
-      break;
-
-    case 'retry':
-      diff.statsDelta.processing--;
-      diff.statsDelta.pending++;
-      diff.statsDelta.retry++;
-      diff.removeProcessing.push(event.jobId);
-      diff.addRetry.push({
-        ...job,
-        retryAt: event.retryAt,
-      });
-      break;
-  }
-}
 
 // ============================================================================
 // Server Management
@@ -119,6 +46,11 @@ let lastSentStatus: DashboardStatus | null = null;
 let lastSyncHeartbeat: number = 0;
 let lastPausedState = false;
 
+// Batching state for job events (reduces IPC flood during high-throughput sync)
+let refreshPending = false;
+let flushRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+const REFRESH_BATCH_INTERVAL_MS = 50;
+
 // How long to wait before considering sync loop dead (90 seconds)
 const SYNC_HEARTBEAT_TIMEOUT_MS = 90_000;
 
@@ -133,6 +65,24 @@ function sendToChild(message: ParentMessage): void {
   if (!dashboardProcess?.stdin) return;
   // Bun's FileSink has a write() method that accepts strings
   dashboardProcess.stdin.write(JSON.stringify(message) + '\n');
+}
+
+/**
+ * Schedule a batched refresh trigger to the dashboard subprocess.
+ * Accumulates events for REFRESH_BATCH_INTERVAL_MS before sending.
+ */
+function scheduleRefreshFlush(): void {
+  if (flushRefreshTimer) return; // Already scheduled
+
+  flushRefreshTimer = setTimeout(() => {
+    flushRefreshTimer = null;
+    if (!dashboardProcess) return;
+
+    if (refreshPending) {
+      sendToChild({ type: 'job_refresh' });
+      refreshPending = false;
+    }
+  }, REFRESH_BATCH_INTERVAL_MS);
 }
 
 /**
@@ -241,14 +191,13 @@ export function startDashboard(config: Config, dryRun = false): void {
   // Send initial config
   sendToChild({ type: 'config', config, dryRun });
 
-  // Forward job events to child process via stdin immediately
-  // Child process handles debouncing before pushing to browser
-  jobEventHandler = (event: JobEvent) => {
+  // Forward job events to child process via stdin with batching
+  // Events are accumulated for 50ms before sending to reduce IPC flood
+  jobEventHandler = () => {
     if (!dashboardProcess) return;
 
-    const diff = createEmptyDiff();
-    accumulateEventIntoDiff(event, diff);
-    sendToChild({ type: 'job_state_diff', diff });
+    refreshPending = true;
+    scheduleRefreshFlush();
   };
   jobEvents.on('job', jobEventHandler);
 }
@@ -257,6 +206,12 @@ export function startDashboard(config: Config, dryRun = false): void {
  * Stop the dashboard process.
  */
 export async function stopDashboard(): Promise<void> {
+  // Stop batching timer
+  if (flushRefreshTimer) {
+    clearTimeout(flushRefreshTimer);
+    flushRefreshTimer = null;
+  }
+
   // Stop heartbeat
   if (heartbeatInterval) {
     clearInterval(heartbeatInterval);

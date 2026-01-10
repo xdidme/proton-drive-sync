@@ -81,19 +81,22 @@
   (function () {
     let rotation = 0;
     let lastTime = performance.now();
-    let frameCount = 0;
     const ROTATION_SPEED = 360; // degrees per second
 
     function updateSpinners(currentTime) {
-      const deltaTime = (currentTime - lastTime) / 1000;
+      const spinners = document.querySelectorAll('.js-spin');
+
+      // Only calculate rotation if spinners exist (reduces CPU when idle)
+      if (spinners.length > 0) {
+        const deltaTime = (currentTime - lastTime) / 1000;
+        rotation = (rotation + ROTATION_SPEED * deltaTime) % 360;
+
+        spinners.forEach((el) => {
+          el.style.transform = `rotate(${rotation}deg)`;
+        });
+      }
+
       lastTime = currentTime;
-      rotation = (rotation + ROTATION_SPEED * deltaTime) % 360;
-
-      document.querySelectorAll('.js-spin').forEach((el) => {
-        el.style.transform = `rotate(${rotation}deg)`;
-      });
-
-      frameCount++;
       requestAnimationFrame(updateSpinners);
     }
 
