@@ -4,7 +4,7 @@
  * Handles CLI argument parsing and delegates to the sync engine.
  */
 
-import { loadConfig, watchConfig } from '../config.js';
+import { getConfig, watchConfig } from '../config.js';
 import { logger, setDryRun } from '../logger.js';
 import { startSignalListener, stopSignalListener, registerSignalHandler } from '../signals.js';
 import { acquireRunLock, releaseRunLock, setFlag, isPaused, FLAGS } from '../flags.js';
@@ -172,7 +172,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
   }
 
   // Load configuration
-  const config = loadConfig();
+  const config = getConfig();
   if (!config) {
     logger.error('No config file found. Run `proton-drive-sync init` first.');
     process.exit(1);

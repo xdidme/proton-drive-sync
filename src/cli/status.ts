@@ -5,7 +5,7 @@
  */
 
 import { isAlreadyRunning, isPaused } from '../flags.js';
-import { loadConfig, DEFAULT_DASHBOARD_PORT } from '../config.js';
+import { getConfig, DEFAULT_DASHBOARD_PORT } from '../config.js';
 
 // ============================================================================
 // Types
@@ -22,7 +22,7 @@ interface StatusResult {
 // ============================================================================
 
 export async function statusCommand(): Promise<void> {
-  const config = loadConfig();
+  const config = getConfig();
   const running = await isAlreadyRunning();
   const paused = running ? await isPaused() : false;
   const port = config.dashboard_port ?? DEFAULT_DASHBOARD_PORT;

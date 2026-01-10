@@ -11,7 +11,7 @@ import { logger } from '../logger.js';
 import { registerSignalHandler } from '../signals.js';
 import { isPaused } from '../flags.js';
 import { sendStatusToDashboard } from '../dashboard/server.js';
-import { getConfig, onConfigChange } from '../config.js';
+import { getConfig, onConfigChange, getExcludePatterns } from '../config.js';
 
 import type { Config } from '../config.js';
 import type { ProtonDriveClient } from '../proton/types.js';
@@ -43,6 +43,7 @@ import {
   deleteNodeMappingsUnderPath,
   cleanupOrphanedNodeMappings,
 } from './nodes.js';
+import { isPathExcluded } from './exclusions.js';
 import { JOB_POLL_INTERVAL_MS, SHUTDOWN_TIMEOUT_MS } from './constants.js';
 
 // ============================================================================
@@ -105,6 +106,13 @@ function handleFileChange(file: FileChange, config: Config, dryRun: boolean): vo
   }
 
   const { localPath, remotePath } = target;
+
+  // Check if path is excluded
+  const excludePatterns = getExcludePatterns();
+  if (isPathExcluded(localPath, file.watchRoot, excludePatterns)) {
+    logger.debug(`[watcher] Skipping excluded path: ${file.name}`);
+    return;
+  }
 
   if (!file.exists) {
     // DELETE event

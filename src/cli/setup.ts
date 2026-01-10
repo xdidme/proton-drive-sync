@@ -12,7 +12,7 @@ import { getStoredCredentials } from '../keychain.js';
 import { isAlreadyRunning } from '../flags.js';
 import { logger } from '../logger.js';
 import {
-  loadConfig,
+  getConfig,
   ensureConfigDir,
   CONFIG_FILE,
   DEFAULT_DASHBOARD_HOST,
@@ -80,7 +80,7 @@ function loadOrCreateConfig(): Config {
     logger.info(`Created default config file: ${CONFIG_FILE}`);
     return defaultConfig;
   }
-  return loadConfig();
+  return getConfig();
 }
 
 function saveConfig(config: Config): void {

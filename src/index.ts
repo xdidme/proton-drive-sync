@@ -4,7 +4,7 @@
 
 import { program } from 'commander';
 import { authCommand } from './cli/auth.js';
-import { configCommand } from './cli/config.js';
+import { configCommand, excludeCommand } from './cli/config.js';
 import { enableDebug } from './logger.js';
 import { logsCommand, logsClearCommand } from './cli/logs.js';
 import { pauseCommand } from './cli/pause.js';
@@ -49,11 +49,20 @@ program
   .option('--logout', 'Clear stored credentials from keychain')
   .action(authCommand);
 
-program
+const configCmd = program
   .command('config')
   .description('Open settings dashboard or set config values')
   .option('--set <key=value...>', 'Set config values directly (e.g., --set dashboard_host=0.0.0.0)')
   .action(configCommand);
+
+configCmd
+  .command('exclude')
+  .description('Manage file exclusion patterns')
+  .option('--path <path>', 'Target path for exclusions (default: "/" for all sync dirs)')
+  .option('--add <patterns...>', 'Add exclusion patterns')
+  .option('--remove <patterns...>', 'Remove exclusion patterns')
+  .option('--list', 'List exclusion patterns')
+  .action(excludeCommand);
 
 program
   .command('reset')
