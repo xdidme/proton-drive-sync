@@ -13,7 +13,7 @@ import { existsSync } from 'fs';
 import { getStoredCredentials } from '../keychain.js';
 import { isAlreadyRunning } from '../flags.js';
 import { logger } from '../logger.js';
-import { getConfig, DEFAULT_DASHBOARD_PORT } from '../config.js';
+import { getConfig } from '../config.js';
 import { getEffectiveHome } from '../paths.js';
 import { authCommand } from './auth.js';
 import { dashboardHostCommand, configCommand, remoteDeleteBehaviorCommand } from './config.js';
@@ -286,8 +286,8 @@ async function waitForServiceAndOpenDashboard(): Promise<void> {
   }
 
   const config = getConfig();
-  const port = config.dashboard_port ?? DEFAULT_DASHBOARD_PORT;
-  const dashboardHost = config.dashboard_host ?? '127.0.0.1';
+  const port = config.dashboard_port;
+  const dashboardHost = config.dashboard_host;
 
   if (running) {
     logger.info('Service started successfully!');
@@ -348,7 +348,7 @@ export async function setupCommand(): Promise<void> {
     console.log('  Then visit the dashboard to configure sync directories:');
     console.log('');
     const config = getConfig();
-    const port = config.dashboard_port ?? DEFAULT_DASHBOARD_PORT;
+    const port = config.dashboard_port;
     console.log(`    http://localhost:${port}`);
     console.log('');
   }

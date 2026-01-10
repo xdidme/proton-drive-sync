@@ -5,15 +5,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { select, confirm, input } from '@inquirer/prompts';
 
-import {
-  CONFIG_FILE,
-  ensureConfigDir,
-  getConfig,
-  DEFAULT_DASHBOARD_HOST,
-  DEFAULT_DASHBOARD_PORT,
-  DEFAULT_SYNC_CONCURRENCY,
-  DEFAULT_REMOTE_DELETE_BEHAVIOR,
-} from '../config.js';
+import { CONFIG_FILE, ensureConfigDir, getConfig, defaultConfig } from '../config.js';
 import type { Config, ExcludePattern, SyncDir, RemoteDeleteBehavior } from '../config.js';
 import { chownToEffectiveUser } from '../paths.js';
 import { validateGlob, clearRegexCache } from '../sync/exclusions.js';
@@ -134,12 +126,10 @@ export function getCommand(key: string | undefined, options: GetOptions): void {
   } else {
     // Show all config
     console.log('Current configuration:\n');
-    console.log(`  dashboard_host: ${config.dashboard_host ?? DEFAULT_DASHBOARD_HOST}`);
-    console.log(`  dashboard_port: ${config.dashboard_port ?? DEFAULT_DASHBOARD_PORT}`);
-    console.log(`  sync_concurrency: ${config.sync_concurrency ?? DEFAULT_SYNC_CONCURRENCY}`);
-    console.log(
-      `  remote_delete_behavior: ${config.remote_delete_behavior ?? DEFAULT_REMOTE_DELETE_BEHAVIOR}`
-    );
+    console.log(`  dashboard_host: ${config.dashboard_host}`);
+    console.log(`  dashboard_port: ${config.dashboard_port}`);
+    console.log(`  sync_concurrency: ${config.sync_concurrency}`);
+    console.log(`  remote_delete_behavior: ${config.remote_delete_behavior}`);
 
     if (config.sync_dirs && config.sync_dirs.length > 0) {
       console.log('\n  sync_dirs:');
@@ -192,7 +182,7 @@ export async function remoteDeleteBehaviorCommand(value?: string): Promise<void>
 
   const config = loadConfigRaw();
   const current =
-    (config.remote_delete_behavior as RemoteDeleteBehavior) ?? DEFAULT_REMOTE_DELETE_BEHAVIOR;
+    (config.remote_delete_behavior as RemoteDeleteBehavior) ?? defaultConfig.remote_delete_behavior;
 
   const behavior = await select({
     message: 'Remote delete behavior:',
@@ -263,7 +253,7 @@ export async function dashboardHostCommand(value?: string): Promise<void> {
     default: currentlyRemote,
   });
 
-  const newHost = enableRemote ? '0.0.0.0' : DEFAULT_DASHBOARD_HOST;
+  const newHost = enableRemote ? '0.0.0.0' : defaultConfig.dashboard_host;
   config.dashboard_host = newHost;
   saveConfigRaw(config);
 
@@ -298,7 +288,7 @@ export async function dashboardPortCommand(value?: string): Promise<void> {
 
   // Interactive mode
   const config = loadConfigRaw();
-  const currentPort = (config.dashboard_port as number) ?? DEFAULT_DASHBOARD_PORT;
+  const currentPort = (config.dashboard_port as number) ?? defaultConfig.dashboard_port;
 
   const portStr = await input({
     message: 'Dashboard port:',
@@ -342,7 +332,7 @@ export async function concurrencyCommand(value?: string): Promise<void> {
 
   // Interactive mode
   const config = loadConfigRaw();
-  const current = (config.sync_concurrency as number) ?? DEFAULT_SYNC_CONCURRENCY;
+  const current = (config.sync_concurrency as number) ?? defaultConfig.sync_concurrency;
 
   const numStr = await input({
     message: 'Sync concurrency (parallel uploads):',
