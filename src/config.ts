@@ -26,9 +26,18 @@ export interface ExcludePattern {
   globs: string[];
 }
 
+/** Behavior when a local file is deleted */
+export const RemoteDeleteBehavior = {
+  TRASH: 'trash',
+  PERMANENT: 'permanent',
+} as const;
+
+export type RemoteDeleteBehavior = (typeof RemoteDeleteBehavior)[keyof typeof RemoteDeleteBehavior];
+
 export interface Config {
   sync_dirs: SyncDir[];
   sync_concurrency: number;
+  remote_delete_behavior: RemoteDeleteBehavior;
   dashboard_host?: string;
   dashboard_port?: number;
   exclude_patterns?: ExcludePattern[];
@@ -49,6 +58,9 @@ export const CONFIG_CHECK_SIGNAL = 'config:check';
 
 /** Default sync concurrency */
 export const DEFAULT_SYNC_CONCURRENCY = 4;
+
+/** Default remote delete behavior - move to trash for safety */
+export const DEFAULT_REMOTE_DELETE_BEHAVIOR: RemoteDeleteBehavior = 'trash';
 
 /** Default dashboard host (localhost only) */
 export const DEFAULT_DASHBOARD_HOST = '127.0.0.1';
@@ -81,6 +93,7 @@ function parseConfig(throwOnError: boolean): Config | null {
     const defaultConfig: Config = {
       sync_dirs: [],
       sync_concurrency: DEFAULT_SYNC_CONCURRENCY,
+      remote_delete_behavior: DEFAULT_REMOTE_DELETE_BEHAVIOR,
     };
     writeFileSync(CONFIG_FILE, JSON.stringify(defaultConfig, null, 2));
     chownToEffectiveUser(CONFIG_FILE);
@@ -106,6 +119,11 @@ function parseConfig(throwOnError: boolean): Config | null {
     // Default sync_concurrency if not set
     if (config.sync_concurrency === undefined) {
       config.sync_concurrency = DEFAULT_SYNC_CONCURRENCY;
+    }
+
+    // Default remote_delete_behavior if not set
+    if (config.remote_delete_behavior === undefined) {
+      config.remote_delete_behavior = DEFAULT_REMOTE_DELETE_BEHAVIOR;
     }
 
     // Validate all sync_dirs entries
@@ -219,6 +237,7 @@ function reloadConfig(): void {
   const keys: ConfigKey[] = [
     'sync_dirs',
     'sync_concurrency',
+    'remote_delete_behavior',
     'dashboard_host',
     'dashboard_port',
     'exclude_patterns',

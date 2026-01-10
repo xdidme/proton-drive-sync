@@ -16,7 +16,7 @@ import { logger } from '../logger.js';
 import { getConfig, DEFAULT_DASHBOARD_PORT } from '../config.js';
 import { getEffectiveHome } from '../paths.js';
 import { authCommand } from './auth.js';
-import { dashboardHostCommand, configCommand } from './config.js';
+import { dashboardHostCommand, configCommand, remoteDeleteBehaviorCommand } from './config.js';
 import { serviceInstallCommand, isServiceInstalled, loadSyncService } from './service/index.js';
 import type { InstallScope } from './service/types.js';
 
@@ -252,6 +252,12 @@ async function configureAuth(): Promise<void> {
   await authCommand({});
 }
 
+async function configureDeleteBehavior(): Promise<void> {
+  showSection('Remote Delete Behavior');
+  // Use the interactive config command
+  await remoteDeleteBehaviorCommand();
+}
+
 async function configureAdvanced(): Promise<void> {
   showSection('Advanced Configuration');
 
@@ -324,10 +330,13 @@ export async function setupCommand(): Promise<void> {
   // Step 3: Authentication
   await configureAuth();
 
-  // Step 4: Advanced configuration (optional)
+  // Step 4: Delete behavior configuration
+  await configureDeleteBehavior();
+
+  // Step 5: Advanced configuration (optional)
   await configureAdvanced();
 
-  // Step 5: Wait for service and show dashboard URL
+  // Step 6: Wait for service and show dashboard URL
   if (serviceInstalled || (await isAlreadyRunning())) {
     await waitForServiceAndOpenDashboard();
   } else {
