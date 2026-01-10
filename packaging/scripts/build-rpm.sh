@@ -53,11 +53,14 @@ rpmbuild --define "_topdir $(pwd)/rpmbuild" \
 	--target "${ARCH}" \
 	-bb rpmbuild/SPECS/proton-drive-sync.spec
 
+# Disable TTY for GPG in CI environment
+export GPG_TTY=""
+
 # Sign the package
 RPM_FILE=$(find rpmbuild/RPMS/${ARCH}/ -name "*.rpm" | head -1)
 echo "Signing ${RPM_FILE}..."
 rpmsign --define "_gpg_name 832B348E3FF2D4F3" \
-	--define "__gpg_sign_cmd %{__gpg} gpg --batch --yes --pinentry-mode loopback --passphrase-fd 3 -u '%{_gpg_name}' -sbo %{__signature_filename} %{__plaintext_filename}" \
+	--define "__gpg_sign_cmd %{__gpg} gpg --batch --yes --no-tty --pinentry-mode loopback --passphrase-fd 3 -u '%{_gpg_name}' -sbo %{__signature_filename} %{__plaintext_filename}" \
 	--addsign "${RPM_FILE}" 3<<<"${GPG_PASSPHRASE}"
 
 # Verify signature
