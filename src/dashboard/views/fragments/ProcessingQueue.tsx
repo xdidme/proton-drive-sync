@@ -10,14 +10,14 @@ type Props = {
   count: number;
   syncStatus: SyncStatus;
   authStatus: AuthStatusUpdate;
-  limit?: number;
+  limit: number;
 };
 
 export const ProcessingQueue: FC<Props> = ({ jobs, count, syncStatus, authStatus, limit }) => {
   const isPaused = syncStatus === 'paused';
   const isActive = syncStatus === 'syncing' && authStatus.status === 'authenticated';
-  const displayJobs = limit ? jobs.slice(0, limit) : jobs;
-  const isTruncated = limit && jobs.length > limit;
+  const displayJobs = jobs.slice(0, limit);
+  const isTruncated = jobs.length > limit;
 
   return (
     <>

@@ -40,34 +40,6 @@ export interface DashboardJob {
   createdAt?: Date;
 }
 
-/** Accumulated job state changes to send to frontend */
-export interface DashboardDiff {
-  /** Stats deltas: positive = increment, negative = decrement */
-  statsDelta: {
-    pending: number;
-    processing: number;
-    synced: number;
-    blocked: number;
-    retry: number;
-  };
-  /** Jobs to add to the processing list */
-  addProcessing: DashboardJob[];
-  /** Job IDs to remove from the processing list */
-  removeProcessing: number[];
-  /** Jobs to add to the recent (synced) list */
-  addRecent: DashboardJob[];
-  /** Jobs to add to the blocked list */
-  addBlocked: DashboardJob[];
-  /** Jobs to add to the pending list */
-  addPending: DashboardJob[];
-  /** Job IDs to remove from the pending list */
-  removePending: number[];
-  /** Jobs to add to the retry list */
-  addRetry: DashboardJob[];
-  /** Job IDs to remove from the retry list */
-  removeRetry: number[];
-}
-
 // ============================================================================
 // Parent → Child Messages (sent via stdin)
 // ============================================================================
@@ -79,10 +51,9 @@ export interface ConfigMessage {
   dryRun: boolean;
 }
 
-/** Job state diff message sent on job events */
-export interface JobStateDiffMessage {
-  type: 'job_state_diff';
-  diff: DashboardDiff;
+/** Job refresh trigger message - tells dashboard to re-query DB */
+export interface JobRefreshMessage {
+  type: 'job_refresh';
 }
 
 /** Status update message sent on auth/sync status changes */
@@ -98,7 +69,7 @@ export interface HeartbeatMessage {
 }
 
 /** Union of all messages parent can send to child */
-export type ParentMessage = ConfigMessage | JobStateDiffMessage | StatusMessage | HeartbeatMessage;
+export type ParentMessage = ConfigMessage | JobRefreshMessage | StatusMessage | HeartbeatMessage;
 
 // ============================================================================
 // Child → Parent Messages (sent via stdout)
@@ -131,40 +102,6 @@ export type ChildMessage = ReadyMessage | ErrorMessage | LogMessage;
 // ============================================================================
 // Utilities
 // ============================================================================
-
-/** Create an empty diff */
-export function createEmptyDiff(): DashboardDiff {
-  return {
-    statsDelta: { pending: 0, processing: 0, synced: 0, blocked: 0, retry: 0 },
-    addProcessing: [],
-    removeProcessing: [],
-    addRecent: [],
-    addBlocked: [],
-    addPending: [],
-    removePending: [],
-    addRetry: [],
-    removeRetry: [],
-  };
-}
-
-/** Check if a diff has any changes worth sending */
-export function hasDiffChanges(diff: DashboardDiff): boolean {
-  return (
-    diff.statsDelta.pending !== 0 ||
-    diff.statsDelta.processing !== 0 ||
-    diff.statsDelta.synced !== 0 ||
-    diff.statsDelta.blocked !== 0 ||
-    diff.statsDelta.retry !== 0 ||
-    diff.addProcessing.length > 0 ||
-    diff.removeProcessing.length > 0 ||
-    diff.addRecent.length > 0 ||
-    diff.addBlocked.length > 0 ||
-    diff.addPending.length > 0 ||
-    diff.removePending.length > 0 ||
-    diff.addRetry.length > 0 ||
-    diff.removeRetry.length > 0
-  );
-}
 
 /**
  * Send a message to stdout as newline-delimited JSON.

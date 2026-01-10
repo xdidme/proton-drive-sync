@@ -13,11 +13,8 @@ import {
   type AuthStatusUpdate,
   type SyncStatus,
   type DashboardStatus,
-  type DashboardJob,
-  type DashboardDiff,
   type ParentMessage,
   type ChildMessage,
-  createEmptyDiff,
   parseMessage,
 } from './ipc.js';
 
@@ -28,81 +25,11 @@ export type {
   SyncStatus,
   DashboardStatus,
   DashboardJob,
-  DashboardDiff,
 } from './ipc.js';
 
 // ============================================================================
 // Constants
 // ============================================================================
-
-// ============================================================================
-// Event Accumulation
-// ============================================================================
-
-/**
- * Accumulate a job event into a diff.
- *
- * Event types and their effects on stats:
- * - enqueue: pending++ (job added to queue)
- * - processing: pending--, processing++ (job picked up for processing)
- * - synced: processing--, synced++ (job completed)
- * - blocked: processing--, blocked++ (job failed permanently)
- * - retry: processing--, pending++ (job scheduled for retry)
- */
-function accumulateEventIntoDiff(event: JobEvent, diff: DashboardDiff): void {
-  const job: DashboardJob = {
-    id: event.jobId,
-    localPath: event.localPath,
-    remotePath: event.remotePath,
-    createdAt: event.timestamp,
-  };
-
-  switch (event.type) {
-    case 'enqueue':
-      diff.statsDelta.pending++;
-      diff.addPending.push(job);
-      break;
-
-    case 'processing':
-      diff.statsDelta.pending--;
-      diff.statsDelta.processing++;
-      if (event.wasRetry) {
-        diff.statsDelta.retry--;
-        diff.removeRetry.push(event.jobId);
-      }
-      diff.removePending.push(event.jobId);
-      diff.addProcessing.push(job);
-      break;
-
-    case 'synced':
-      diff.statsDelta.processing--;
-      diff.statsDelta.synced++;
-      diff.removeProcessing.push(event.jobId);
-      diff.addRecent.push(job);
-      break;
-
-    case 'blocked':
-      diff.statsDelta.processing--;
-      diff.statsDelta.blocked++;
-      diff.removeProcessing.push(event.jobId);
-      diff.addBlocked.push({
-        ...job,
-        lastError: event.error,
-      });
-      break;
-
-    case 'retry':
-      diff.statsDelta.processing--;
-      diff.statsDelta.pending++;
-      diff.statsDelta.retry++;
-      diff.removeProcessing.push(event.jobId);
-      diff.addRetry.push({
-        ...job,
-        retryAt: event.retryAt,
-      });
-      break;
-  }
-}
 
 // ============================================================================
 // Server Management
@@ -120,9 +47,9 @@ let lastSyncHeartbeat: number = 0;
 let lastPausedState = false;
 
 // Batching state for job events (reduces IPC flood during high-throughput sync)
-let pendingDiff: DashboardDiff = createEmptyDiff();
-let flushDiffTimer: ReturnType<typeof setTimeout> | null = null;
-const DIFF_BATCH_INTERVAL_MS = 50;
+let refreshPending = false;
+let flushRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+const REFRESH_BATCH_INTERVAL_MS = 50;
 
 // How long to wait before considering sync loop dead (90 seconds)
 const SYNC_HEARTBEAT_TIMEOUT_MS = 90_000;
@@ -141,37 +68,21 @@ function sendToChild(message: ParentMessage): void {
 }
 
 /**
- * Check if the pending diff has any changes worth sending.
+ * Schedule a batched refresh trigger to the dashboard subprocess.
+ * Accumulates events for REFRESH_BATCH_INTERVAL_MS before sending.
  */
-function hasDiffChanges(diff: DashboardDiff): boolean {
-  return (
-    diff.addPending.length > 0 ||
-    diff.removePending.length > 0 ||
-    diff.addProcessing.length > 0 ||
-    diff.removeProcessing.length > 0 ||
-    diff.addRecent.length > 0 ||
-    diff.addBlocked.length > 0 ||
-    diff.addRetry.length > 0 ||
-    diff.removeRetry.length > 0
-  );
-}
+function scheduleRefreshFlush(): void {
+  if (flushRefreshTimer) return; // Already scheduled
 
-/**
- * Schedule a batched diff flush to the dashboard subprocess.
- * Accumulates events for DIFF_BATCH_INTERVAL_MS before sending.
- */
-function scheduleDiffFlush(): void {
-  if (flushDiffTimer) return; // Already scheduled
-
-  flushDiffTimer = setTimeout(() => {
-    flushDiffTimer = null;
+  flushRefreshTimer = setTimeout(() => {
+    flushRefreshTimer = null;
     if (!dashboardProcess) return;
 
-    if (hasDiffChanges(pendingDiff)) {
-      sendToChild({ type: 'job_state_diff', diff: pendingDiff });
+    if (refreshPending) {
+      sendToChild({ type: 'job_refresh' });
+      refreshPending = false;
     }
-    pendingDiff = createEmptyDiff();
-  }, DIFF_BATCH_INTERVAL_MS);
+  }, REFRESH_BATCH_INTERVAL_MS);
 }
 
 /**
@@ -282,11 +193,11 @@ export function startDashboard(config: Config, dryRun = false): void {
 
   // Forward job events to child process via stdin with batching
   // Events are accumulated for 50ms before sending to reduce IPC flood
-  jobEventHandler = (event: JobEvent) => {
+  jobEventHandler = () => {
     if (!dashboardProcess) return;
 
-    accumulateEventIntoDiff(event, pendingDiff);
-    scheduleDiffFlush();
+    refreshPending = true;
+    scheduleRefreshFlush();
   };
   jobEvents.on('job', jobEventHandler);
 }
@@ -296,9 +207,9 @@ export function startDashboard(config: Config, dryRun = false): void {
  */
 export async function stopDashboard(): Promise<void> {
   // Stop batching timer
-  if (flushDiffTimer) {
-    clearTimeout(flushDiffTimer);
-    flushDiffTimer = null;
+  if (flushRefreshTimer) {
+    clearTimeout(flushRefreshTimer);
+    flushRefreshTimer = null;
   }
 
   // Stop heartbeat

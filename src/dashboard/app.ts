@@ -36,7 +36,6 @@ import {
 } from '../config.js';
 import {
   type AuthStatusUpdate,
-  type DashboardDiff,
   type DashboardJob,
   type DashboardStatus,
   type SyncStatus,
@@ -46,8 +45,6 @@ import {
   parseMessage,
 } from './ipc.js';
 import type { Config } from '../config.js';
-
-import type { JobCounts } from './views/fragments/types.js';
 
 /** Maximum number of items to display in each queue (for DOM performance) */
 const QUEUE_DISPLAY_LIMIT = 100;
@@ -180,9 +177,6 @@ let currentSyncStatus: SyncStatus = 'disconnected';
 let currentConfig: Config | null = null;
 let loggedAuthUser: string | null = null; // Track logged auth to avoid duplicate logs
 
-/** Cached job counts - initialized on first SSE connection, updated via diffs */
-let cachedCounts: JobCounts | null = null;
-
 /**
  * Read and process messages from parent process via stdin.
  * Messages are newline-delimited JSON.
@@ -218,8 +212,8 @@ async function readParentMessages(): Promise<void> {
     const msg = parseMessage<ParentMessage>(line);
     if (!msg) continue;
 
-    if (msg.type === 'job_state_diff') {
-      stateDiffEvents.emit('job_state_diff', msg.diff);
+    if (msg.type === 'job_refresh') {
+      stateDiffEvents.emit('job_refresh');
     } else if (msg.type === 'config') {
       if (msg.dryRun !== undefined) isDryRun = msg.dryRun;
       if (msg.config) currentConfig = msg.config;
@@ -1151,7 +1145,6 @@ app.get('/api/events', async (c) => {
 
     // Initial full push - get full state from DB
     const initialSnapshot = snapshot();
-    cachedCounts = { ...initialSnapshot.counts }; // Cache initial counts from DB
     lastProcessing = processingIds(initialSnapshot.processing);
 
     pushFragments(stream, initialSnapshot, [
@@ -1180,12 +1173,8 @@ app.get('/api/events', async (c) => {
     const flushFragments = () => {
       fragmentDebounceTimer = null;
 
-      // Query fresh state from DB (no caching - simpler and avoids memory leaks)
+      // Query fresh state from DB
       const s = snapshot();
-      // Use cached counts for stats (updated via diffs for accuracy)
-      if (cachedCounts) {
-        s.counts = cachedCounts;
-      }
       const curProcessing = processingIds(s.processing);
 
       // Always push stats & all queues
@@ -1204,28 +1193,9 @@ app.get('/api/events', async (c) => {
       }
     };
 
-    // Job diff: apply deltas to cached counts, debounce fragment push
-    const onJobDiff = (diff: DashboardDiff) => {
-      // Apply deltas to cached counts (avoid DB query for counts)
-      if (cachedCounts) {
-        cachedCounts.pending += diff.statsDelta.pending;
-        cachedCounts.processing += diff.statsDelta.processing;
-        cachedCounts.synced += diff.statsDelta.synced;
-        cachedCounts.blocked += diff.statsDelta.blocked;
-        cachedCounts.retry += diff.statsDelta.retry;
-        // Derive pendingReady from pending - retry
-        cachedCounts.pendingReady = cachedCounts.pending - cachedCounts.retry;
-
-        // Ensure non-negative values
-        cachedCounts.pending = Math.max(0, cachedCounts.pending);
-        cachedCounts.pendingReady = Math.max(0, cachedCounts.pendingReady);
-        cachedCounts.processing = Math.max(0, cachedCounts.processing);
-        cachedCounts.synced = Math.max(0, cachedCounts.synced);
-        cachedCounts.blocked = Math.max(0, cachedCounts.blocked);
-        cachedCounts.retry = Math.max(0, cachedCounts.retry);
-      }
-
-      // Debounce the fragment push (job lists queried fresh from DB in flushFragments)
+    // Job refresh: debounce fragment push (queries DB fresh each time)
+    const onJobRefresh = () => {
+      // Debounce the fragment push
       if (!fragmentDebounceTimer) {
         fragmentDebounceTimer = setTimeout(flushFragments, FRAGMENT_DEBOUNCE_MS);
       }
@@ -1256,13 +1226,13 @@ app.get('/api/events', async (c) => {
       stream.writeSSE({ event: 'heartbeat', data: '' });
     };
 
-    stateDiffEvents.on('job_state_diff', onJobDiff);
+    stateDiffEvents.on('job_refresh', onJobRefresh);
     statusEvents.on('status', onStatus);
     heartbeatEvents.on('heartbeat', onHeartbeat);
 
     stream.onAbort(() => {
       if (fragmentDebounceTimer) clearTimeout(fragmentDebounceTimer);
-      stateDiffEvents.off('job_state_diff', onJobDiff);
+      stateDiffEvents.off('job_refresh', onJobRefresh);
       statusEvents.off('status', onStatus);
       heartbeatEvents.off('heartbeat', onHeartbeat);
     });

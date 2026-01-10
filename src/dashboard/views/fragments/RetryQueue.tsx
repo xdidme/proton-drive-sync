@@ -6,12 +6,12 @@ import { Icon } from './Icon.js';
 type Props = {
   jobs: DashboardJob[];
   count: number;
-  limit?: number;
+  limit: number;
 };
 
 export const RetryQueue: FC<Props> = ({ jobs, count, limit }) => {
-  const displayJobs = limit ? jobs.slice(0, limit) : jobs;
-  const isTruncated = limit && jobs.length > limit;
+  const displayJobs = jobs.slice(0, limit);
+  const isTruncated = jobs.length > limit;
 
   return (
     <>
