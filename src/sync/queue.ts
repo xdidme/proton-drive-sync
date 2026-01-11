@@ -451,6 +451,7 @@ export function categorizeError(error: string): ErrorClassification {
     lowerError.includes('parent session expired') ||
     lowerError.includes('re-authentication required') ||
     lowerError.includes('invalid refresh token') ||
+    lowerError.includes('invalid access token') ||
     lowerError.includes('10013') // Proton API error code for invalid refresh token
   ) {
     return {

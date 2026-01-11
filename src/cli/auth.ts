@@ -27,6 +27,7 @@ export type { ProtonDriveClient } from '../proton/types.js';
  */
 async function createProtonDriveClientFromSession(
   session: Session,
+  onTokenRefresh: () => Promise<void>,
   sdkDebug: boolean = false
 ): Promise<ProtonDriveClient> {
   // Load the SDK
@@ -36,7 +37,7 @@ async function createProtonDriveClientFromSession(
   // Import telemetry module for logging configuration (not exported from main index)
   const telemetryModule = await import('@protontech/drive-sdk/dist/telemetry.js');
 
-  const httpClient = createProtonHttpClient(session);
+  const httpClient = createProtonHttpClient(session, onTokenRefresh);
   const openPGPCryptoModule = createOpenPGPCrypto();
   const account = createProtonAccount(session, openPGPCryptoModule);
   const srpModuleInstance = createSrpModule();
@@ -116,7 +117,15 @@ export async function createClientFromLogin(
   }
   const credentials = auth.getReusableCredentials();
 
-  const client = await createProtonDriveClientFromSession(session, sdkDebug);
+  // Create refresh callback that updates tokens and persists to keychain
+  const onTokenRefresh = async () => {
+    await auth.refreshToken();
+    const updatedCreds = auth.getReusableCredentials();
+    await storeCredentials({ ...updatedCreds, username });
+    logger.info(`Token refreshed for ${username}.`);
+  };
+
+  const client = await createProtonDriveClientFromSession(session, onTokenRefresh, sdkDebug);
 
   return {
     client,
@@ -143,7 +152,15 @@ export async function createClientFromTokens(
   const auth = new ProtonAuth();
   const session = await auth.restoreSession(credentials);
 
-  return createProtonDriveClientFromSession(session, sdkDebug);
+  // Create refresh callback that updates tokens and persists to keychain
+  const onTokenRefresh = async () => {
+    await auth.refreshToken();
+    const updatedCreds = auth.getReusableCredentials();
+    await storeCredentials({ ...updatedCreds, username: credentials.username });
+    logger.info(`Token refreshed for ${credentials.username}.`);
+  };
+
+  return createProtonDriveClientFromSession(session, onTokenRefresh, sdkDebug);
 }
 
 export async function authCommand(options: { logout?: boolean } = {}): Promise<void> {
@@ -233,7 +250,8 @@ export async function authCommand(options: { logout?: boolean } = {}): Promise<v
     const credentials = auth.getReusableCredentials();
 
     // Verify client can be created (validates the session works)
-    await createProtonDriveClientFromSession(finalSession, false);
+    // Use no-op refresh callback since credentials will be saved fresh below
+    await createProtonDriveClientFromSession(finalSession, async () => {}, false);
 
     // Save tokens and username to keychain
     await deleteStoredCredentials();
