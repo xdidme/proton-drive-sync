@@ -1,11 +1,9 @@
-# Proton Drive Sync
-
-Automatically syncs selected local folders to Proton Drive in the background, with a dashboard for monitoring.
+<p align="center">
+  <img src="readme_assets/banner.png" alt="Proton Drive Sync" />
+</p>
 
 <p align="center">
-
-https://github.com/user-attachments/assets/bf1fccac-9a08-4da1-bc0c-2c06d510fbf1
-
+  <video src="https://github.com/user-attachments/assets/bf1fccac-9a08-4da1-bc0c-2c06d510fbf1" width="600" />
 </p>
 
 ## Installation
