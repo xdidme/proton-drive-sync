@@ -202,7 +202,8 @@ const BCRYPT_PREFIX = '$2y$10$';
 // Linux has no official APP_VERSION, so we masquerade as `macos`
 const PLATFORM_MAP: Record<string, string> = { darwin: 'macos', win32: 'windows' };
 const PLATFORM = PLATFORM_MAP[process.platform] ?? 'macos';
-const APP_VERSION = `${PLATFORM}-drive@1.0.0-alpha.1`;
+const APP_VERSION =
+  PLATFORM === 'windows' ? `${PLATFORM}-drive@1.12.4` : `${PLATFORM}-drive@2.10.1`;
 const CHILD_CLIENT_ID = PLATFORM === 'macos' ? 'macOSDrive' : 'windowsDrive';
 
 // SRP Modulus verification key
