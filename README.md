@@ -3,8 +3,12 @@
 </p>
 
 <p align="center">
-  <video src="https://github.com/user-attachments/assets/bf1fccac-9a08-4da1-bc0c-2c06d510fbf1" width="600" />
+  <video src="https://github.com/user-attachments/assets/bf1fccac-9a08-4da1-bc0c-2c06d510fbf1" width="400" />
 </p>
+
+<a href="https://www.buymeacoffee.com/thebitflipper" target="_blank">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50">
+</a>
 
 ## Installation
 
@@ -131,9 +135,3 @@ For package managers:
 ## Development
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for development setup and contributing guidelines.
-
----
-
-<a href="https://www.buymeacoffee.com/thebitflipper" target="_blank">
-  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50">
-</a>
