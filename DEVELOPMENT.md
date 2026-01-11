@@ -62,11 +62,8 @@ brew install proton-drive-sync-prerelease
 ### Debian / Ubuntu
 
 ```bash
-# Download GPG key (if not already added)
-sudo curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x832B348E3FF2D4F3" -o /usr/share/keyrings/proton-drive-sync.asc
-
 # Add repository (if not already added)
-echo "deb [signed-by=/usr/share/keyrings/proton-drive-sync.asc] https://repo.damianb.dev/apt/ /" | sudo tee /etc/apt/sources.list.d/proton-drive-sync.list
+echo "deb [trusted=yes] https://repo.damianb.dev/apt/ * *" | sudo tee /etc/apt/sources.list.d/proton-drive-sync.list
 sudo apt update
 
 # Install prerelease
@@ -82,8 +79,7 @@ sudo tee /etc/yum.repos.d/proton-drive-sync.repo << 'EOF'
 name=Proton Drive Sync
 baseurl=https://repo.damianb.dev/yum/
 enabled=1
-gpgcheck=1
-gpgkey=https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x832B348E3FF2D4F3
+gpgcheck=0
 EOF
 
 # Install prerelease

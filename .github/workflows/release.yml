@@ -115,29 +115,22 @@ jobs:
       - name: Install packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev rpm debsigs
+          sudo apt-get install -y dpkg-dev rpm
 
-      - name: Setup GPG
-        run: ./packaging/scripts/setup-gpg.sh
-        env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-
-      - name: Build and sign .deb package
+      - name: Build .deb package
         run: ./packaging/scripts/build-deb.sh
         env:
           VERSION: ${{ steps.version.outputs.version }}
           ARCH: ${{ matrix.deb_arch }}
           BINARY_PATH: binaries/proton-drive-sync
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
           PACKAGE_NAME: ${{ steps.version.outputs.package_name }}
 
-      - name: Build and sign .rpm package
+      - name: Build .rpm package
         run: ./packaging/scripts/build-rpm.sh
         env:
           VERSION: ${{ steps.version.outputs.version }}
           ARCH: ${{ matrix.rpm_arch }}
           BINARY_PATH: binaries/proton-drive-sync
-          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
           PACKAGE_NAME: ${{ steps.version.outputs.package_name }}
 
       - name: Upload packages to release

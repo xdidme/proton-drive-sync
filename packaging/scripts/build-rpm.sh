@@ -1,10 +1,9 @@
 #!/bin/bash
-# Build and sign an .rpm package
+# Build an .rpm package
 # Required environment variables:
 #   VERSION - Package version (e.g., "0.2.1" or "0.2.1-beta.1")
 #   ARCH - Architecture: "x86_64" or "aarch64"
 #   BINARY_PATH - Path to the binary to package
-#   GPG_PASSPHRASE - Passphrase for GPG signing
 #
 # Optional environment variables:
 #   PACKAGE_NAME - Package name (default: "proton-drive-sync")
@@ -15,7 +14,7 @@
 set -euo pipefail
 
 # Validate required environment variables
-for var in VERSION ARCH BINARY_PATH GPG_PASSPHRASE; do
+for var in VERSION ARCH BINARY_PATH; do
 	if [[ -z "${!var:-}" ]]; then
 		echo "Error: ${var} environment variable is required"
 		exit 1
@@ -53,25 +52,8 @@ rpmbuild --define "_topdir $(pwd)/rpmbuild" \
 	--target "${ARCH}" \
 	-bb rpmbuild/SPECS/proton-drive-sync.spec
 
-# Disable TTY for GPG in CI environment
-export GPG_TTY=""
-
-# Sign the package
-RPM_FILE=$(find rpmbuild/RPMS/${ARCH}/ -name "*.rpm" | head -1)
-echo "Signing ${RPM_FILE}..."
-rpmsign --define "_gpg_name 832B348E3FF2D4F3" \
-	--define "__gpg_sign_cmd %{__gpg} gpg --batch --yes --no-tty --pinentry-mode loopback --passphrase-fd 3 -u '%{_gpg_name}' -sbo %{__signature_filename} %{__plaintext_filename}" \
-	--addsign "${RPM_FILE}" 3<<<"${GPG_PASSPHRASE}"
-
-# Import public key to RPM keyring for verification
-gpg --armor --export 832B348E3FF2D4F3 >/tmp/rpm-signing-key.asc
-rpm --import /tmp/rpm-signing-key.asc
-rm -f /tmp/rpm-signing-key.asc
-
-# Verify signature
-rpm -K "${RPM_FILE}"
-
 # Copy to current directory
+RPM_FILE=$(find rpmbuild/RPMS/${ARCH}/ -name "*.rpm" | head -1)
 cp "${RPM_FILE}" ./
 
-echo "Successfully built and signed: $(basename "${RPM_FILE}")"
+echo "Successfully built: $(basename "${RPM_FILE}")"
