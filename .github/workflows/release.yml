@@ -184,7 +184,7 @@ jobs:
           client-payload: '{"version": "${{ github.event.release.tag_name }}", "prerelease": ${{ github.event.release.prerelease }}}'
 
   publish-aur:
-    needs: build
+    needs: package
     runs-on: ubuntu-latest
     if: github.event.release.prerelease == true
 

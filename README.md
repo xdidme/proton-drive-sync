@@ -58,10 +58,11 @@ proton-drive-sync setup
 On Arch Linux and derivatives, install from the [AUR package](https://aur.archlinux.org/packages/proton-drive-sync-bin):
 
 ```bash
+# Install via yay
 yay -S proton-drive-sync-bin
-# alternatively using paru
+
+# Install via paru
 paru -S proton-drive-sync-bin
-# or use your preferred AUR helper
 ```
 
 <details>

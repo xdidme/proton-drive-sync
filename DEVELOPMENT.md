@@ -86,6 +86,18 @@ EOF
 sudo dnf install proton-drive-sync-prerelease
 ```
 
+### Arch Linux (AUR)
+
+On Arch Linux and derivatives, install from the [AUR package](https://aur.archlinux.org/packages/proton-drive-sync-prerelease-bin):
+
+```bash
+# Install via yay
+yay -S proton-drive-sync-prerelease-bin
+
+# Install via paru
+paru -S proton-drive-sync-prerelease-bin
+```
+
 ### Manual Installation
 
 Download the pre-release tarball for your platform from [GitHub Releases](https://github.com/DamianB-BitFlipper/proton-drive-sync/releases) and extract it:
