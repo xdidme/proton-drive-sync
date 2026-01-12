@@ -115,7 +115,9 @@ jobs:
       - name: Install packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev rpm
+          sudo apt-get install -y dpkg-dev rpm flatpak flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
 
       - name: Build .deb package
         run: ./packaging/scripts/build-deb.sh
@@ -133,12 +135,30 @@ jobs:
           BINARY_PATH: binaries/proton-drive-sync
           PACKAGE_NAME: ${{ steps.version.outputs.package_name }}
 
+      - name: Build AppImage
+        run: ./packaging/scripts/build-appimage.sh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ARCH: ${{ matrix.arch == 'x64' && 'x86_64' || 'aarch64' }}
+          BINARY_PATH: binaries/proton-drive-sync
+          PRERELEASE: ${{ github.event.release.prerelease }}
+
+      - name: Build Flatpak
+        run: ./packaging/scripts/build-flatpak.sh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ARCH: ${{ matrix.arch == 'x64' && 'x86_64' || 'aarch64' }}
+          BINARY_PATH: binaries/proton-drive-sync
+          PRERELEASE: ${{ github.event.release.prerelease }}
+
       - name: Upload packages to release
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           gh release upload "v${VERSION}" \
             ${{ steps.version.outputs.package_name }}_${VERSION}_${{ matrix.deb_arch }}.deb \
-            ${{ steps.version.outputs.package_name }}-*.${{ matrix.rpm_arch }}.rpm
+            ${{ steps.version.outputs.package_name }}-*.${{ matrix.rpm_arch }}.rpm \
+            Proton_Drive_Sync*.AppImage \
+            Proton_Drive_Sync*.flatpak
         env:
           GH_TOKEN: ${{ github.token }}
 

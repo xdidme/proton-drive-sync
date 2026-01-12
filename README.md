@@ -22,7 +22,10 @@ brew install proton-drive-sync
 proton-drive-sync setup
 ```
 
-### Debian / Ubuntu
+### Linux
+
+<details>
+<summary>Debian / Ubuntu</summary>
 
 ```bash
 # Add repository
@@ -35,7 +38,10 @@ sudo apt install proton-drive-sync
 proton-drive-sync setup
 ```
 
-### Fedora / RHEL / CentOS
+</details>
+
+<details>
+<summary>Fedora / RHEL / CentOS</summary>
 
 ```bash
 # Add repository
@@ -53,9 +59,12 @@ sudo dnf install proton-drive-sync
 proton-drive-sync setup
 ```
 
-### Arch Linux (AUR)
+</details>
 
-On Arch Linux and derivatives, install from the [AUR package](https://aur.archlinux.org/packages/proton-drive-sync-bin):
+<details>
+<summary>Arch Linux (AUR)</summary>
+
+Install from the [AUR package](https://aur.archlinux.org/packages/proton-drive-sync-bin):
 
 ```bash
 # Install via yay
@@ -65,8 +74,47 @@ yay -S proton-drive-sync-bin
 paru -S proton-drive-sync-bin
 ```
 
+</details>
+
 <details>
-<summary>Other Linux</summary>
+<summary>AppImage</summary>
+
+Download the AppImage from [GitHub Releases](https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest):
+
+```bash
+# Download (replace VERSION and ARCH as needed)
+wget https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest/download/Proton_Drive_Sync-VERSION-x86_64.AppImage
+
+# Make executable and run
+chmod +x Proton_Drive_Sync-*.AppImage
+./Proton_Drive_Sync-*.AppImage setup
+
+# Optionally move to PATH
+sudo mv Proton_Drive_Sync-*.AppImage /usr/local/bin/proton-drive-sync
+```
+
+</details>
+
+<details>
+<summary>Flatpak</summary>
+
+Download the Flatpak bundle from [GitHub Releases](https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest):
+
+```bash
+# Download (replace VERSION and ARCH as needed)
+wget https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest/download/Proton_Drive_Sync-VERSION-x86_64.flatpak
+
+# Install
+flatpak install --user Proton_Drive_Sync-*.flatpak
+
+# Run
+flatpak run io.github.damianbbitflipper.ProtonDriveSync setup
+```
+
+</details>
+
+<details>
+<summary>Tarball (manual)</summary>
 
 Download the Linux tarball from [GitHub Releases](https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest):
 
