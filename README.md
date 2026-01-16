@@ -133,8 +133,34 @@ proton-drive-sync setup
 
 </details>
 
+### Coming Soon
+
 <details>
-<summary>Installing Pre-release Versions</summary>
+<summary>Windows</summary>
+
+Download the `.zip` from [GitHub Releases](https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest), extract, and add to your PATH.
+
+</details>
+
+<details>
+<summary>Docker</summary>
+
+See **[DOCKER_SETUP.md](DOCKER_SETUP.md)** for running with Docker Compose on Linux x86_64 and ARM64.
+
+```bash
+cd docker/
+cp .env.example .env
+# Edit .env with KEYRING_PASSWORD and sync directory paths
+docker compose up -d
+docker exec -it proton-drive-sync proton-drive-sync auth
+```
+
+</details>
+
+### Installing Pre-release Versions
+
+<details>
+<summary>Pre-release packages</summary>
 
 Pre-release packages (`proton-drive-sync-prerelease`) allow you to test upcoming features before stable release. They conflict with the stable package, so only one can be installed at a time.
 
@@ -204,30 +230,6 @@ sudo apt install proton-drive-sync-prerelease
 
 # Switch back to stable
 sudo apt install proton-drive-sync
-```
-
-</details>
-
-### Coming Soon
-
-<details>
-<summary>Windows</summary>
-
-Download the `.zip` from [GitHub Releases](https://github.com/DamianB-BitFlipper/proton-drive-sync/releases/latest), extract, and add to your PATH.
-
-</details>
-
-<details>
-<summary>Docker</summary>
-
-See **[DOCKER_SETUP.md](DOCKER_SETUP.md)** for running with Docker Compose on Linux x86_64 and ARM64.
-
-```bash
-cd docker/
-cp .env.example .env
-# Edit .env with KEYRING_PASSWORD and sync directory paths
-docker compose up -d
-docker exec -it proton-drive-sync proton-drive-sync auth
 ```
 
 </details>
